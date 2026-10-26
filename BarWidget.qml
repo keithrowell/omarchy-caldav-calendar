@@ -49,12 +49,32 @@ BarWidget {
   function closeForPopoutSwitch() { if (panelLoader.item) panelLoader.item.closeForPopoutSwitch() }
 
   function injectPanel() {
-    var target = panelLoader.item
-    if (!target) return
-    if ("bar" in target) target.bar = root.bar
-    if ("settings" in target) target.settings = root.settings
-    if ("anchorItem" in target) target.anchorItem = button
-    if ("hostWidget" in target) target.hostWidget = root
+    var targets = [panelLoader.item, windowLoader.item]
+    for (var i = 0; i < targets.length; i++) {
+      var target = targets[i]
+      if (!target) continue
+      if ("bar" in target) target.bar = root.bar
+      if ("settings" in target) target.settings = root.settings
+      if ("anchorItem" in target) target.anchorItem = button
+      if ("hostWidget" in target) target.hostWidget = root
+    }
+  }
+
+  // The window is a second copy of the panel, created the first time it is
+  // asked for and kept afterwards so it reopens where it left off.
+  function openWindow() {
+    if (windowLoader.item) {
+      windowLoader.item.open()
+      return
+    }
+    windowLoader.active = true
+    windowLoader.setSource(Qt.resolvedUrl("Panel.qml"), { windowMode: true })
+  }
+
+  function closeWindow() { if (windowLoader.item) windowLoader.item.close() }
+  function toggleWindow() {
+    if (windowLoader.item && windowLoader.item.windowShown) closeWindow()
+    else openWindow()
   }
 
   implicitWidth: button.implicitWidth
@@ -80,9 +100,23 @@ BarWidget {
     }
   }
 
+  Loader {
+    id: windowLoader
+    active: false
+    asynchronous: true
+    visible: false
+    onLoaded: {
+      root.injectPanel()
+      item.open()
+    }
+  }
+
   IpcHandler {
     target: "omarchy.clock"
 
+    function openWindow(): void { root.openWindow() }
+    function closeWindow(): void { root.closeWindow() }
+    function toggleWindow(): void { root.toggleWindow() }
     function refresh(): void { root.broadcast("refresh") }
     function open(): void { root.open() }
     function close(): void { root.close() }

@@ -1,0 +1,16 @@
+#!/bin/bash
+# Open the calendar in its own window, or bring it forward if it is already
+# open. The window lives in the Omarchy shell, so this asks the shell for it.
+
+set -euo pipefail
+
+omarchy-shell omarchy.clock openWindow >/dev/null
+
+# The first open builds the window, which takes a moment.
+for _ in $(seq 1 30); do
+  if hyprctl clients -j | grep -q '"title": "Calendar"'; then
+    hyprctl dispatch 'hl.dsp.focus({ window = "title:^Calendar$" })' >/dev/null 2>&1 || true
+    exit 0
+  fi
+  sleep 0.2
+done

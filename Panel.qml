@@ -13,6 +13,11 @@ Panel {
   manageIpc: false
 
   property var anchorItem: null
+  // The bar widget loads a second copy of this panel with windowMode set, to
+  // show the calendar in an ordinary window that Hyprland tiles.
+  property bool windowMode: false
+  property bool windowShown: false
+  readonly property bool active: opened || windowShown
   property var hostWidget: null
   readonly property var barIdentity: hostWidget || root
   readonly property var calendarService: bar && bar.shell ? bar.shell.serviceFor(root.moduleName) : null
@@ -106,16 +111,33 @@ Panel {
     root.now = new Date()
     if (calendarService) calendarService.setReminderMinutes(root.reminderMinutes, root.timeFormat)
     refresh(!!(calendarService && calendarService.status !== "ready"))
+    if (root.windowMode) {
+      root.windowShown = true
+      Qt.callLater(function() { if (keyCatcher) keyCatcher.forceActiveFocus() })
+      return
+    }
     root.controller.show()
     Qt.callLater(function() { if (root.opened) setCenterHoverRevealSuppressed(true) })
   }
 
   function close() {
+    if (root.windowMode) {
+      root.windowShown = false
+      return
+    }
     setCenterHoverRevealSuppressed(false)
     root.controller.hide()
   }
 
-  function toggle() { root.opened ? root.close() : root.open() }
+  function toggle() { root.active ? root.close() : root.open() }
+
+  function openInWindow() {
+    if (!root.hostWidget || typeof root.hostWidget.openWindow !== "function") return
+    root.close()
+    root.hostWidget.openWindow()
+  }
+
+  Component.onCompleted: if (windowMode) keyCatcher.parent = windowBody
 
   function closeForPopoutSwitch() {
     root.popoutSwitchClosing = true
@@ -779,28 +801,28 @@ Panel {
 
   Timer {
     interval: 10000
-    running: root.opened && root.viewMode !== "month"
+    running: root.active && root.viewMode !== "month"
     repeat: true
     onTriggered: root.now = new Date()
   }
 
   Timer {
     interval: 20000
-    running: root.opened
+    running: root.active
     repeat: true
     onTriggered: { if (calendarService) calendarService.pollRemote() }
   }
 
   Timer {
     interval: 2000
-    running: root.opened && root.needsEdsInstall
+    running: root.active && root.needsEdsInstall
     repeat: true
     onTriggered: { if (calendarService) calendarService.probeEds() }
   }
 
   Timer {
     interval: 1000
-    running: root.opened && root.edsLoading
+    running: root.active && root.edsLoading
     repeat: true
     onTriggered: { if (calendarService) calendarService.retryEdsSnapshot() }
   }
@@ -822,6 +844,26 @@ Panel {
       } else {
         root.setupError = message
       }
+    }
+  }
+
+  // An ordinary xdg toplevel (class org.quickshell, title Calendar), so it
+  // tiles like any other app. The calendar content is moved into it when this
+  // copy of the panel is created in window mode. Closing it only hides it.
+  FloatingWindow {
+    id: appWindow
+    visible: root.windowMode && root.windowShown
+    title: "Calendar"
+    color: Commons.Color.background
+    implicitWidth: Style.space(1180)
+    implicitHeight: Style.space(860)
+    minimumSize: Qt.size(Style.space(640), Style.space(480))
+    onVisibleChanged: if (!visible) root.windowShown = false
+
+    Item {
+      id: windowBody
+      anchors.fill: parent
+      anchors.margins: Style.space(16)
     }
   }
 
@@ -874,7 +916,7 @@ Panel {
 
           Column {
             id: calendarColumn
-            width: Math.min(parent.width, Style.space(root.compactEds ? 620 : (root.showDayPanel ? 1060 : 820)))
+            width: root.windowMode ? parent.width : Math.min(parent.width, Style.space(root.compactEds ? 620 : (root.showDayPanel ? 1060 : 820)))
             anchors.horizontalCenter: parent.horizontalCenter
             spacing: Style.space(12)
 
@@ -968,13 +1010,24 @@ Panel {
               PanelActionButton {
                 id: dayPanelToggle
                 visible: !root.showingSettings
-                anchors.right: settingsTopButton.left
+                anchors.right: windowButton.visible ? windowButton.left : settingsTopButton.left
                 anchors.rightMargin: Style.space(4)
                 anchors.verticalCenter: parent.verticalCenter
                 iconText: "\uebf4"
                 tooltipText: root.showDayPanel ? "Hide day panel" : "Show day panel"
                 bordered: root.showDayPanel
                 onClicked: root.toggleDayPanel()
+              }
+
+              PanelActionButton {
+                id: windowButton
+                visible: !root.windowMode && !root.showingSettings && !!root.hostWidget
+                anchors.right: settingsTopButton.left
+                anchors.rightMargin: Style.space(4)
+                anchors.verticalCenter: parent.verticalCenter
+                iconText: "󰖯"
+                tooltipText: "Open in a window"
+                onClicked: root.openInWindow()
               }
 
               PanelActionButton {
