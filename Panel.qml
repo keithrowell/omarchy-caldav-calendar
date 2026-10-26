@@ -2642,6 +2642,7 @@ Panel {
   // at once, unlike the settings page.
   component CalendarsMenu: Popup {
     id: calendarsMenuPopup
+    margins: Style.space(8)
     padding: Style.space(10)
     modal: false
     dim: false
@@ -2911,6 +2912,7 @@ Panel {
 
       Popup {
         id: rowMenu
+        margins: Style.space(8)
         x: parent.width - width
         y: parent.height + Style.space(4)
         padding: Style.space(6)
