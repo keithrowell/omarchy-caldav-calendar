@@ -1830,6 +1830,7 @@ Panel {
                   id: timeGridRoot
                   visible: root.viewMode !== "month"
                   width: parent.width
+                  viewportHeight: root.windowMode && !root.creatingEvent ? calendarScroll.height : 0
                 }
               }
               DayPanel {
@@ -3522,6 +3523,18 @@ Panel {
     readonly property int hourHeight: root.viewMode === "day" ? Style.space(50) : Style.space(42)
     readonly property int gridLeft: Style.space(48)
     readonly property int gridRight: Style.space(8)
+    // Height the view may use in the window (0 in the popup), and the height
+    // of the day headings and all-day row that stay above the scrolling hours.
+    property real viewportHeight: 0
+    readonly property real headerRowsHeight: Style.space(42) + (allDayCount > 0 ? allDayRowHeight + spacing : 0) + spacing
+
+    function scrollToWorkingHours() {
+      if (hoursScroll.height >= hoursScroll.contentHeight) return
+      var target = nowDayIndex >= 0 ? Math.max(hourStart, nowHour - 1) : Math.max(hourStart, 8)
+      hoursScroll.contentY = Math.max(0, Math.min(hoursScroll.contentHeight - hoursScroll.height, yForHour(Math.floor(target))))
+    }
+    onVisibleChanged: if (visible) Qt.callLater(scrollToWorkingHours)
+    onViewportHeightChanged: Qt.callLater(scrollToWorkingHours)
     readonly property int columnGap: Style.space(4)
 
     function columnWidth() {
@@ -3667,134 +3680,150 @@ Panel {
       }
     }
 
-    Item {
+    // In the window the hours scroll on their own under the day headings;
+    // in the bar popup the grid keeps its full height as before.
+    Flickable {
+      id: hoursScroll
       width: parent.width
-      height: timeGridView.hourCount * timeGridView.hourHeight
+      height: timeGridView.viewportHeight > 0
+        ? Math.min(hoursGrid.height, Math.max(Style.space(160), timeGridView.viewportHeight - timeGridView.headerRowsHeight))
+        : hoursGrid.height
+      contentWidth: width
+      contentHeight: hoursGrid.height
+      clip: true
+      boundsBehavior: Flickable.StopAtBounds
+      interactive: contentHeight > height
 
-      Repeater {
-        model: timeGridView.hourCount + 1
-        Text {
-          required property int index
-          x: 0
-          y: index * timeGridView.hourHeight - (index === timeGridView.hourCount ? implicitHeight - Style.space(2) : Style.space(6))
-          width: timeGridView.gridLeft - timeGridView.columnGap
-          text: Model.formatHourLabel(index + timeGridView.hourStart, root.timeFormat)
-          color: Commons.Color.muted
-          horizontalAlignment: Text.AlignRight
-          font.family: root.bar ? root.bar.fontFamily : Style.font.family
-          font.pixelSize: Style.font.caption
-          opacity: timeGridView.nowInView && Math.abs(index * timeGridView.hourHeight - timeGridView.yForHour(timeGridView.nowHour)) < Style.space(14) ? 0 : 1
-        }
-      }
+      Item {
+        id: hoursGrid
+        width: parent.width
+        height: timeGridView.hourCount * timeGridView.hourHeight
 
-      Rectangle {
-        z: 5
-        visible: timeGridView.nowInView
-        x: timeGridView.gridLeft
-        y: timeGridView.yForHour(timeGridView.nowHour) - 1
-        width: parent.width - timeGridView.gridLeft - timeGridView.gridRight
-        height: 2
-        color: Commons.Color.urgent
-      }
-
-      Rectangle {
-        z: 6
-        visible: timeGridView.nowInView
-        width: Style.space(8)
-        height: Style.space(8)
-        radius: width / 2
-        color: Commons.Color.urgent
-        x: timeGridView.gridLeft + timeGridView.nowDayIndex * (timeGridView.columnWidth() + timeGridView.columnGap) - width / 2
-        y: timeGridView.yForHour(timeGridView.nowHour) - height / 2
-      }
-
-      Text {
-        z: 7
-        visible: timeGridView.nowInView
-        x: Math.max(0, timeGridView.gridLeft - timeGridView.columnGap - implicitWidth)
-        y: timeGridView.yForHour(timeGridView.nowHour) - implicitHeight / 2
-        text: Model.formatClockTime(root.now.getHours(), root.now.getMinutes(), root.timeFormat)
-        color: Commons.Color.urgent
-        font.family: root.bar ? root.bar.fontFamily : Style.font.family
-        font.pixelSize: Math.max(9, Style.font.caption - 1)
-        wrapMode: Text.NoWrap
-      }
-
-      Repeater {
-        model: root.viewDays
-        Item {
-          id: dayColumn
-          required property date modelData
-          required property int index
-          property string key: Model.keyForDate(modelData)
-          property var dayEvents: Model.eventsForDay(root.eventGroups, key)
-          property var timedEvents: Model.layoutTimedEvents(dayEvents, key, timeGridView.hourStart, timeGridView.hourEnd)
-          x: timeGridView.gridLeft + index * (timeGridView.columnWidth() + timeGridView.columnGap)
-          y: 0
-          width: timeGridView.columnWidth()
-          height: parent.height
-
-          Rectangle {
-            z: 0
-            anchors.fill: parent
-            visible: dayColumn.key === root.selectedKey
-            color: Util.alpha(Commons.Color.accent, 0.08)
+        Repeater {
+          model: timeGridView.hourCount + 1
+          Text {
+            required property int index
+            x: 0
+            y: index * timeGridView.hourHeight - (index === timeGridView.hourCount ? implicitHeight - Style.space(2) : Style.space(6))
+            width: timeGridView.gridLeft - timeGridView.columnGap
+            text: Model.formatHourLabel(index + timeGridView.hourStart, root.timeFormat)
+            color: Commons.Color.muted
+            horizontalAlignment: Text.AlignRight
+            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            font.pixelSize: Style.font.caption
+            opacity: timeGridView.nowInView && Math.abs(index * timeGridView.hourHeight - timeGridView.yForHour(timeGridView.nowHour)) < Style.space(14) ? 0 : 1
           }
+        }
 
-          Repeater {
-            model: timeGridView.hourCount
+        Rectangle {
+          z: 5
+          visible: timeGridView.nowInView
+          x: timeGridView.gridLeft
+          y: timeGridView.yForHour(timeGridView.nowHour) - 1
+          width: parent.width - timeGridView.gridLeft - timeGridView.gridRight
+          height: 2
+          color: Commons.Color.urgent
+        }
+
+        Rectangle {
+          z: 6
+          visible: timeGridView.nowInView
+          width: Style.space(8)
+          height: Style.space(8)
+          radius: width / 2
+          color: Commons.Color.urgent
+          x: timeGridView.gridLeft + timeGridView.nowDayIndex * (timeGridView.columnWidth() + timeGridView.columnGap) - width / 2
+          y: timeGridView.yForHour(timeGridView.nowHour) - height / 2
+        }
+
+        Text {
+          z: 7
+          visible: timeGridView.nowInView
+          x: Math.max(0, timeGridView.gridLeft - timeGridView.columnGap - implicitWidth)
+          y: timeGridView.yForHour(timeGridView.nowHour) - implicitHeight / 2
+          text: Model.formatClockTime(root.now.getHours(), root.now.getMinutes(), root.timeFormat)
+          color: Commons.Color.urgent
+          font.family: root.bar ? root.bar.fontFamily : Style.font.family
+          font.pixelSize: Math.max(9, Style.font.caption - 1)
+          wrapMode: Text.NoWrap
+        }
+
+        Repeater {
+          model: root.viewDays
+          Item {
+            id: dayColumn
+            required property date modelData
+            required property int index
+            property string key: Model.keyForDate(modelData)
+            property var dayEvents: Model.eventsForDay(root.eventGroups, key)
+            property var timedEvents: Model.layoutTimedEvents(dayEvents, key, timeGridView.hourStart, timeGridView.hourEnd)
+            x: timeGridView.gridLeft + index * (timeGridView.columnWidth() + timeGridView.columnGap)
+            y: 0
+            width: timeGridView.columnWidth()
+            height: parent.height
+
             Rectangle {
-              required property int index
-              y: index * timeGridView.hourHeight
-              width: parent.width
-              height: timeGridView.hourHeight
-              color: index % 2 === 0 ? Style.normalFillFor(Commons.Color.foreground, Commons.Color.accent, Commons.Color.urgent) : Style.hoverFillFor(Commons.Color.foreground, Commons.Color.accent)
-              border.color: Util.alpha(Commons.Color.muted, 0.35)
+              z: 0
+              anchors.fill: parent
+              visible: dayColumn.key === root.selectedKey
+              color: Util.alpha(Commons.Color.accent, 0.08)
+            }
+
+            Repeater {
+              model: timeGridView.hourCount
+              Rectangle {
+                required property int index
+                y: index * timeGridView.hourHeight
+                width: parent.width
+                height: timeGridView.hourHeight
+                color: index % 2 === 0 ? Style.normalFillFor(Commons.Color.foreground, Commons.Color.accent, Commons.Color.urgent) : Style.hoverFillFor(Commons.Color.foreground, Commons.Color.accent)
+                border.color: Util.alpha(Commons.Color.muted, 0.35)
+                border.width: 1
+              }
+            }
+
+            Rectangle {
+              z: 1
+              visible: root.draggingTimeSelection && root.dragDayKey === dayColumn.key
+              x: Style.space(3)
+              y: timeGridView.yForHour(Math.min(root.dragStartHour, root.dragEndHour))
+              width: parent.width - Style.space(6)
+              height: Math.max(Style.space(12), Math.abs(root.dragEndHour - root.dragStartHour) * timeGridView.hourHeight)
+              radius: Style.cornerRadius
+              color: Util.alpha(Commons.Color.accent, 0.45)
+              border.color: Commons.Color.accent
               border.width: 1
             }
-          }
 
-          Rectangle {
-            z: 1
-            visible: root.draggingTimeSelection && root.dragDayKey === dayColumn.key
-            x: Style.space(3)
-            y: timeGridView.yForHour(Math.min(root.dragStartHour, root.dragEndHour))
-            width: parent.width - Style.space(6)
-            height: Math.max(Style.space(12), Math.abs(root.dragEndHour - root.dragStartHour) * timeGridView.hourHeight)
-            radius: Style.cornerRadius
-            color: Util.alpha(Commons.Color.accent, 0.45)
-            border.color: Commons.Color.accent
-            border.width: 1
-          }
-
-          MouseArea {
-            z: 2
-            anchors.fill: parent
-            cursorShape: Qt.CrossCursor
-            preventStealing: true
-            onPressed: function(mouse) { root.beginTimeSelection(dayColumn.key, timeGridView.hourForY(mouse.y)) }
-            onPositionChanged: function(mouse) { root.updateTimeSelection(timeGridView.hourForY(mouse.y)) }
-            onReleased: root.finishTimeSelection()
-            onCanceled: {
-              root.draggingTimeSelection = false
-              root.dragDayKey = ""
+            MouseArea {
+              z: 2
+              anchors.fill: parent
+              cursorShape: Qt.CrossCursor
+              preventStealing: true
+              onPressed: function(mouse) { root.beginTimeSelection(dayColumn.key, timeGridView.hourForY(mouse.y)) }
+              onPositionChanged: function(mouse) { root.updateTimeSelection(timeGridView.hourForY(mouse.y)) }
+              onReleased: root.finishTimeSelection()
+              onCanceled: {
+                root.draggingTimeSelection = false
+                root.dragDayKey = ""
+              }
             }
-          }
 
-          Repeater {
-            model: dayColumn.timedEvents
-            EventCard {
-              z: 4
-              required property var modelData
-              readonly property real laneGap: Style.space(3)
-              readonly property real laneWidth: (parent.width - Style.space(6) - (modelData.lanes - 1) * laneGap) / modelData.lanes
-              x: Style.space(3) + modelData.lane * (laneWidth + laneGap)
-              y: timeGridView.yForHour(modelData.startHour)
-              width: laneWidth
-              height: Math.max(Style.space(22), (modelData.endHour - modelData.startHour) * timeGridView.hourHeight)
-              mode: "block"
-              event: modelData.event
-              onClicked: function(mouse) { root.handleEventClick(event, mouse, this) }
+            Repeater {
+              model: dayColumn.timedEvents
+              EventCard {
+                z: 4
+                required property var modelData
+                readonly property real laneGap: Style.space(3)
+                readonly property real laneWidth: (parent.width - Style.space(6) - (modelData.lanes - 1) * laneGap) / modelData.lanes
+                x: Style.space(3) + modelData.lane * (laneWidth + laneGap)
+                y: timeGridView.yForHour(modelData.startHour)
+                width: laneWidth
+                height: Math.max(Style.space(22), (modelData.endHour - modelData.startHour) * timeGridView.hourHeight)
+                mode: "block"
+                event: modelData.event
+                onClicked: function(mouse) { root.handleEventClick(event, mouse, this) }
+              }
             }
           }
         }
