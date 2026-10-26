@@ -313,4 +313,27 @@ const spillDay = model.monthGrid(2026, 7, 1, '', model.eventsByDay([
 assert.equal(spillDay.find(day => day.key === '2026-07-27').eventCount, 1)
 assert.equal(spillDay.find(day => day.key === '2026-07-26'), undefined)
 
+assert.equal(model.providerLabel('caldav', 'apidata.googleusercontent.com'), 'Google')
+assert.equal(model.hexColorInput('#1E66F5'), '#1e66f5')
+assert.equal(model.hexColorInput('f80'), '#ff8800')
+assert.equal(model.hexColorInput('#12345'), '')
+assert.equal(model.hexColorInput('blue'), '')
+
+const byDay = { '2026-08-20': [{ id: 'a', calendarId: 'work' }, { id: 'b', calendarId: 'home' }], '2026-08-21': [{ id: 'c', calendarId: 'work' }] }
+assert.strictEqual(model.visibleEventsByDay(byDay, {}), byDay)
+assert.strictEqual(model.visibleEventsByDay(byDay, { work: false }), byDay)
+assert.deepEqual(model.visibleEventsByDay(byDay, { work: true }), { '2026-08-20': [{ id: 'b', calendarId: 'home' }] })
+assert.equal(model.calendarHidden({ work: true }, 'work'), true)
+assert.equal(model.calendarHidden({ work: true }, 'home'), false)
+
+const groups = model.calendarGroups([
+  { id: 'p', name: 'Personal', provider: 'evolution-data-server' },
+  { id: 'z', name: 'zebra', provider: 'caldav', host: 'p104-caldav.icloud.com' },
+  { id: 'g', name: 'Work', provider: 'caldav', host: 'apidata.googleusercontent.com' },
+  { id: 'a', name: 'Apple', provider: 'caldav', host: 'p104-caldav.icloud.com' }
+], { z: 'Aardvark' })
+assert.deepEqual(groups.map(group => group.label), ['Google', 'iCloud', 'On this computer'])
+assert.deepEqual(groups[1].calendars.map(entry => entry.calendar.id), ['z', 'a'])
+assert.equal(groups[1].calendars[0].index, 1)
+
 console.log('ok - calendar model')

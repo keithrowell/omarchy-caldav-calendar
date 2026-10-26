@@ -568,6 +568,8 @@ function parseOperationResponse(text) {
 }
 
 var DEFAULT_CALENDAR_COLORS = ['#8aadf4', '#a6e3a1', '#f9e2af', '#f38ba8', '#cba6f7', '#94e2d5', '#fab387', '#89dceb', '#f2cdcd', '#b4befe']
+// Stronger colours offered alongside the pastel defaults in the colour picker.
+var EXTRA_CALENDAR_COLORS = ['#e64553', '#fe640b', '#df8e1d', '#40a02b', '#179299', '#1e66f5', '#7287fd', '#8839ef', '#ea76cb', '#dd7878', '#904d34', '#6c6f85']
 
 function copyMap(value) {
   var result = {}
@@ -587,6 +589,7 @@ function providerLabel(provider, host) {
       'icloud.com.cn': 'iCloud',
       'google.com': 'Google',
       'googleapis.com': 'Google',
+      'googleusercontent.com': 'Google',
       'fastmail.com': 'Fastmail',
       'fastmail.fm': 'Fastmail',
       'yahoo.com': 'Yahoo'
@@ -650,6 +653,59 @@ function contrastingForeground(color, fillStrength, lightText, darkText) {
   var strength = fillStrength === undefined ? 1 : fillStrength
   var perceived = colorLuminance(color) * strength
   return perceived > 0.32 ? (darkText || '#1e1e2e') : (lightText || '#cdd6f4')
+}
+
+// A typed colour as #rrggbb, or '' when it isn't one. Accepts 3 or 6 hex
+// digits with or without the leading #.
+function hexColorInput(text) {
+  var value = String(text || '').trim().replace(/^#/, '').toLowerCase()
+  if (!/^([0-9a-f]{3}|[0-9a-f]{6})$/.test(value)) return ''
+  return normalizeColor(value)
+}
+
+function calendarHidden(hidden, calendarId) {
+  return !!(hidden && calendarId && hidden[calendarId] === true)
+}
+
+// eventsByDay with the events of hidden calendars left out. Returns the
+// same object when nothing is hidden so bindings don't churn.
+function visibleEventsByDay(grouped, hidden) {
+  var source = grouped || {}
+  if (!hidden || Object.keys(hidden).every(function(id) { return hidden[id] !== true })) return source
+  var result = {}
+  Object.keys(source).forEach(function(key) {
+    var kept = (source[key] || []).filter(function(event) { return !calendarHidden(hidden, event && event.calendarId) })
+    if (kept.length) result[key] = kept
+  })
+  return result
+}
+
+// Calendars grouped by the account they come from (iCloud, Google, this
+// computer), each group sorted by name. index is the calendar's position in
+// the original list, which the default colours depend on.
+function calendarGroups(calendars, names) {
+  var groups = {}
+  var order = []
+  ;(calendars || []).forEach(function(calendar, index) {
+    if (!calendar) return
+    var label = providerLabel(calendar.provider, calendar.host)
+    if (label === 'Local') label = 'On this computer'
+    if (!groups[label]) {
+      groups[label] = { label: label, calendars: [] }
+      order.push(label)
+    }
+    groups[label].calendars.push({ calendar: calendar, index: index, name: calendarDisplayName(calendar, names) })
+  })
+  order.sort(function(a, b) {
+    if (a === 'On this computer') return 1
+    if (b === 'On this computer') return -1
+    return a.localeCompare(b)
+  })
+  return order.map(function(label) {
+    var group = groups[label]
+    group.calendars.sort(function(a, b) { return a.name.toLowerCase().localeCompare(b.name.toLowerCase()) })
+    return group
+  })
 }
 
 function canRemoveCalendar(calendar) {
@@ -1110,6 +1166,11 @@ if (typeof module !== 'undefined') module.exports = {
   parseHelperResponse,
   parseOperationResponse,
   plainDisplay,
+  calendarGroups,
+  calendarHidden,
+  hexColorInput,
+  visibleEventsByDay,
+  EXTRA_CALENDAR_COLORS,
   parseRRule,
   parseTimeText,
   pruneFiredKeys,

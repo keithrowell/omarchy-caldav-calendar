@@ -26,6 +26,9 @@ The plugin needs Evolution Data Server. If it is not installed, the clock opens 
 - Calendars that live only on this computer
 - Join Zoom, Google Meet, or Teams from a link on the event
 - Optional desktop reminder 5–30 minutes before timed events
+- Show or hide each calendar from the calendar button in the header, or by account in settings. Hidden calendars keep syncing but give no reminders.
+- Pick any calendar colour: a 22-colour palette, the current Omarchy theme's colours, or a hex value
+- Open the calendar in its own window that tiles like any other app: the window button in the header, `scripts/calendar-window`, or `omarchy-shell omarchy.clock openWindow`
 
 <p align="center">
   <img src="screenshots/week.png" alt="Week view" width="480">

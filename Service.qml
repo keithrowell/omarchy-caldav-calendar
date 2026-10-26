@@ -38,6 +38,8 @@ Item {
   property string removeError: ""
   property int reminderMinutes: 10
   property string reminderTimeFormat: "12h"
+  // Calendars switched off in the panel; they keep syncing but don't remind.
+  property var hiddenCalendars: ({})
   property var firedReminders: ({})
   property var pendingNotices: []
   property bool remindersReady: false
@@ -757,6 +759,10 @@ Item {
     removeProc.running = true
   }
 
+  function setHiddenCalendars(hidden) {
+    hiddenCalendars = Model.copyMap(hidden)
+  }
+
   function setReminderMinutes(minutes, timeFormat) {
     reminderMinutes = Model.normalizedReminderMinutes(minutes)
     if (timeFormat) reminderTimeFormat = String(timeFormat) === "24h" ? "24h" : "12h"
@@ -791,7 +797,9 @@ Item {
   function checkReminders() {
     if (!remindersReady || reminderMinutes <= 0) return
     firedReminders = Model.pruneFiredKeys(firedReminders)
-    var due = Model.dueReminders(cachedEvents, reminderMinutes, firedReminders)
+    var hidden = hiddenCalendars
+    var visible = cachedEvents.filter(function(event) { return !Model.calendarHidden(hidden, event && event.calendarId) })
+    var due = Model.dueReminders(visible, reminderMinutes, firedReminders)
     if (!due.length) return
     var next = Model.copyMap(firedReminders)
     var queue = pendingNotices.slice()

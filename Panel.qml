@@ -64,6 +64,9 @@ Panel {
   property string draftReminderMinutes: "10"
   property var draftCalendarNames: ({})
   property var draftCalendarColors: ({})
+  property var draftHiddenCalendars: ({})
+  property var removeCandidate: null
+  property string removeCandidateName: ""
   property bool draggingTimeSelection: false
   property string dragDayKey: ""
   property real dragStartHour: 0
@@ -93,8 +96,13 @@ Panel {
   readonly property int reminderMinutes: Model.normalizedReminderMinutes(setting("reminderMinutes", 10))
   readonly property var calendarNames: setting("calendarNames", {})
   readonly property var calendarColors: setting("calendarColors", {})
-  readonly property var calendarColorPalette: Model.DEFAULT_CALENDAR_COLORS
-  readonly property var eventGroups: calendarService ? calendarService.eventsByDay : ({})
+  readonly property var hiddenCalendars: setting("hiddenCalendars", {})
+  onHiddenCalendarsChanged: if (calendarService) calendarService.setHiddenCalendars(hiddenCalendars)
+  onCalendarServiceChanged: if (calendarService) calendarService.setHiddenCalendars(hiddenCalendars)
+  readonly property int hiddenCalendarCount: Object.keys(hiddenCalendars).filter(function(id) { return hiddenCalendars[id] === true }).length
+  readonly property var calendarColorPalette: Model.DEFAULT_CALENDAR_COLORS.concat(Model.EXTRA_CALENDAR_COLORS)
+  readonly property var themeColorPalette: [String(Commons.Color.accent), String(Commons.Color.foreground), String(Commons.Color.urgent), String(Commons.Color.muted)]
+  readonly property var eventGroups: Model.visibleEventsByDay(calendarService ? calendarService.eventsByDay : ({}), hiddenCalendars)
   readonly property var weeks: Model.monthGrid(viewYear, viewMonth, weekStart, todayKey, eventGroups)
   readonly property var selectedEvents: Model.eventsForDay(eventGroups, selectedKey)
   readonly property var viewDays: Model.daysForView(selectedKey, viewMode, weekStart)
@@ -399,7 +407,8 @@ Panel {
       defaultCalendarId: draftDefaultCalendarId,
       reminderMinutes: parseInt(draftReminderMinutes, 10),
       calendarNames: draftCalendarNames,
-      calendarColors: draftCalendarColors
+      calendarColors: draftCalendarColors,
+      hiddenCalendars: draftHiddenCalendars
     })
     if (calendarService) {
       calendarService.setReminderMinutes(parseInt(draftReminderMinutes, 10), draftTimeFormat)
@@ -423,6 +432,7 @@ Panel {
     draftReminderMinutes = String(reminderMinutes)
     draftCalendarNames = root.loadedCalendarNames()
     draftCalendarColors = root.loadedCalendarColors()
+    draftHiddenCalendars = Model.copyMap(hiddenCalendars)
   }
 
   function restoreSettingsDefaults() {
@@ -438,6 +448,7 @@ Panel {
     draftReminderMinutes = "10"
     draftCalendarNames = ({})
     draftCalendarColors = ({})
+    draftHiddenCalendars = ({})
     settingsError = ""
   }
 
@@ -497,6 +508,79 @@ Panel {
     var next = Model.copyMap(draftCalendarColors)
     next[calendarId] = color
     draftCalendarColors = next
+  }
+
+  function uniqueThemeColors() {
+    var result = []
+    for (var i = 0; i < themeColorPalette.length; i++) {
+      var color = Model.normalizeColor(themeColorPalette[i])
+      if (color && result.indexOf(color) === -1) result.push(color)
+    }
+    return result
+  }
+
+  function askRemoveCalendar(calendar, name) {
+    removeCandidateName = String(name || "")
+    removeCandidate = calendar
+  }
+
+  function cancelRemoveCalendar() {
+    removeCandidate = null
+    removeCandidateName = ""
+  }
+
+  function confirmRemoveCalendar() {
+    var calendar = removeCandidate
+    cancelRemoveCalendar()
+    if (!calendar || !calendar.id) return
+    if (root.draftDefaultCalendarId === calendar.id) root.draftDefaultCalendarId = ""
+    if (calendarService) calendarService.removeCalendar(calendar.id)
+  }
+
+  function removeConfirmMessage() {
+    var calendar = removeCandidate
+    if (!calendar) return ""
+    var account = Model.providerLabel(calendar.provider, calendar.host)
+    var name = "\u201c" + removeCandidateName + "\u201d"
+    if (calendar.provider === "caldav" || calendar.provider === "webcal")
+      return "Remove " + name + " from this computer? It stays on " + account + ", but stops syncing here until you add it again. To keep it but not see it, switch it off instead."
+    return "Delete " + name + "? It only exists on this computer, so its events are deleted."
+  }
+
+  function setDraftCalendarHidden(calendarId, hidden) {
+    var next = Model.copyMap(draftHiddenCalendars)
+    if (hidden) next[calendarId] = true
+    else delete next[calendarId]
+    draftHiddenCalendars = next
+  }
+
+  function setDraftGroupHidden(group, hidden) {
+    var next = Model.copyMap(draftHiddenCalendars)
+    for (var i = 0; i < group.calendars.length; i++) {
+      var id = group.calendars[i].calendar.id
+      if (hidden) next[id] = true
+      else delete next[id]
+    }
+    draftHiddenCalendars = next
+  }
+
+  // The calendars menu in the header shows and hides straight away; the
+  // settings page edits a draft that Save applies.
+  function setCalendarHidden(calendarId, hidden) {
+    var next = Model.copyMap(hiddenCalendars)
+    if (hidden) next[calendarId] = true
+    else delete next[calendarId]
+    persistSettings({ hiddenCalendars: next })
+  }
+
+  function setGroupHidden(group, hidden) {
+    var next = Model.copyMap(hiddenCalendars)
+    for (var i = 0; i < group.calendars.length; i++) {
+      var id = group.calendars[i].calendar.id
+      if (hidden) next[id] = true
+      else delete next[id]
+    }
+    persistSettings({ hiddenCalendars: next })
   }
 
   function calendarAppearanceEntries() {
@@ -888,8 +972,13 @@ Panel {
         if (dy !== 0 && root.viewMode === "month") root.movePeriod(dy * 12)
       }
       onActivateRequested: if (!root.showingSettings) root.goToToday()
-      onCloseRequested: root.showingSettings ? root.cancelSettings() : root.close()
-      onTabRequested: function(direction) { if (!root.showingSettings) root.switchPanel(direction) }
+      onCloseRequested: {
+        if (root.removeCandidate !== null) root.cancelRemoveCalendar()
+        else if (calendarsMenu.opened) calendarsMenu.close()
+        else if (root.showingSettings) root.cancelSettings()
+        else if (!root.windowMode) root.close()
+      }
+      onTabRequested: function(direction) { if (!root.showingSettings && !root.windowMode) root.switchPanel(direction) }
       onTextKey: function(t) {
         if (root.showingSettings) return
         if (t === "[") root.movePeriod(-1)
@@ -899,6 +988,21 @@ Panel {
         else if (t === "m" || t === "M") root.setView("month")
         else if (t === "d" || t === "D") root.setView("day")
         else if (t === "w" || t === "W") root.setView("week")
+      }
+
+      ConfirmDialog {
+        id: removeConfirm
+        anchors.fill: parent
+        z: 20
+        opened: root.removeCandidate !== null
+        selectedIndex: 0
+        message: root.removeConfirmMessage()
+        confirmText: root.removeCandidate && (root.removeCandidate.provider === "caldav" || root.removeCandidate.provider === "webcal") ? "Remove" : "Delete"
+        background: Commons.Color.popups.background
+        fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+        onCanceled: root.cancelRemoveCalendar()
+        onConfirmed: root.confirmRemoveCalendar()
+        onOpenedChanged: if (opened) selectedIndex = 0
       }
 
       Flickable {
@@ -921,14 +1025,21 @@ Panel {
             spacing: Style.space(12)
 
             Item {
+              id: headerBar
               visible: !root.showingSettings && !root.compactEds
               width: parent.width
-              height: Math.max(viewControls.implicitHeight, titleColumn.implicitHeight, actionControls.implicitHeight, settingsTopButton.implicitHeight)
+              readonly property real rowHeight: Math.max(viewControls.implicitHeight, titleColumn.implicitHeight, actionControls.implicitHeight, settingsTopButton.implicitHeight)
+              readonly property real rightWidth: actionControls.implicitWidth + calendarsMenuButton.width + dayPanelToggle.width + (windowButton.visible ? windowButton.width : 0) + settingsTopButton.width + Style.space(28)
+              // A narrow window puts the title on its own row above the controls.
+              readonly property bool stacked: width < viewControls.implicitWidth + titleNav.width + rightWidth + Style.space(24)
+              readonly property real controlsOffset: stacked ? (rowHeight + Style.space(8)) / 2 : 0
+              height: stacked ? rowHeight * 2 + Style.space(8) : rowHeight
 
               Row {
                 id: viewControls
                 anchors.left: parent.left
                 anchors.verticalCenter: parent.verticalCenter
+                anchors.verticalCenterOffset: headerBar.controlsOffset
                 spacing: Style.space(4)
                 ViewButton { text: "Month"; selected: root.viewMode === "month"; onClicked: root.setView("month"); onDoubleClicked: { root.setView("month"); root.goToToday() } }
                 ViewButton { text: "Week"; selected: root.viewMode === "week"; onClicked: root.setView("week"); onDoubleClicked: { root.setView("week"); root.goToToday() } }
@@ -942,6 +1053,7 @@ Panel {
                 height: Math.max(previousButton.implicitHeight, titleColumn.implicitHeight, nextButton.implicitHeight)
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.verticalCenter: parent.verticalCenter
+                anchors.verticalCenterOffset: -headerBar.controlsOffset
 
                 PanelActionButton {
                   id: previousButton
@@ -999,12 +1111,33 @@ Panel {
 
               Row {
                 id: actionControls
-                anchors.right: dayPanelToggle.left
+                anchors.right: calendarsMenuButton.left
                 anchors.rightMargin: Style.space(8)
                 anchors.verticalCenter: parent.verticalCenter
+                anchors.verticalCenterOffset: headerBar.controlsOffset
                 spacing: Style.space(6)
                 Button { id: syncButton; text: "Sync"; tooltipText: "Sync now"; onClicked: root.refresh(true) }
                 Button { text: "Add event"; bordered: true; enabled: calendarService && root.selectedWritableCalendarId() !== ""; selected: root.creatingEvent && !root.editingEvent; onClicked: root.creatingEvent && !root.editingEvent ? root.cancelCreatingEvent() : root.startCreatingEvent() }
+              }
+
+              PanelActionButton {
+                id: calendarsMenuButton
+                visible: !root.showingSettings
+                anchors.right: dayPanelToggle.left
+                anchors.rightMargin: Style.space(4)
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.verticalCenterOffset: headerBar.controlsOffset
+                iconText: "󰃭"
+                tooltipText: root.hiddenCalendarCount > 0 ? "Calendars (" + root.hiddenCalendarCount + " hidden)" : "Show or hide calendars"
+                bordered: root.hiddenCalendarCount > 0 || calendarsMenu.opened
+                onClicked: calendarsMenu.opened ? calendarsMenu.close() : calendarsMenu.open()
+
+                CalendarsMenu {
+                  id: calendarsMenu
+                  objectName: "calendarsMenu"
+                  x: parent.width - width
+                  y: parent.height + Style.space(6)
+                }
               }
 
               PanelActionButton {
@@ -1013,6 +1146,7 @@ Panel {
                 anchors.right: windowButton.visible ? windowButton.left : settingsTopButton.left
                 anchors.rightMargin: Style.space(4)
                 anchors.verticalCenter: parent.verticalCenter
+                anchors.verticalCenterOffset: headerBar.controlsOffset
                 iconText: "\uebf4"
                 tooltipText: root.showDayPanel ? "Hide day panel" : "Show day panel"
                 bordered: root.showDayPanel
@@ -1025,6 +1159,7 @@ Panel {
                 anchors.right: settingsTopButton.left
                 anchors.rightMargin: Style.space(4)
                 anchors.verticalCenter: parent.verticalCenter
+                anchors.verticalCenterOffset: headerBar.controlsOffset
                 iconText: "󰖯"
                 tooltipText: "Open in a window"
                 onClicked: root.openInWindow()
@@ -1034,6 +1169,7 @@ Panel {
                 id: settingsTopButton
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
+                anchors.verticalCenterOffset: headerBar.controlsOffset
                 iconText: "󰒓"
                 tooltipText: root.showingSettings ? "Close settings" : "CalDav Calendar settings"
                 bordered: root.showingSettings
@@ -2313,13 +2449,19 @@ Panel {
       SettingsSection {
         title: "Calendars"
         statusText: calendarService && calendarService.pendingRemoveId ? "Removing…" : (calendarService && calendarService.removeError ? calendarService.removeError : (calendarService && calendarService.syncing ? "Syncing" : ""))
+        Text {
+          width: parent.width
+          text: "Switch a calendar off to hide its events here. Hidden calendars keep syncing. Click a colour dot to change its colour."
+          color: Commons.Color.muted
+          wrapMode: Text.WordWrap
+          font.family: root.bar ? root.bar.fontFamily : Style.font.family
+          font.pixelSize: Style.font.caption
+        }
         Repeater {
-          model: calendarService ? calendarService.calendars : []
-          SettingsCalendarRow {
+          model: calendarService ? Model.calendarGroups(calendarService.calendars, root.calendarNames) : []
+          SettingsCalendarGroup {
             required property var modelData
-            required property int index
-            calendar: modelData
-            calendarIndex: index
+            group: modelData
           }
         }
 
@@ -2496,38 +2638,280 @@ Panel {
     }
   }
 
-  component SettingsCalendarRow: Row {
+  // Header menu: every calendar by account, ticked when shown. Changes apply
+  // at once, unlike the settings page.
+  component CalendarsMenu: Popup {
+    id: calendarsMenuPopup
+    padding: Style.space(10)
+    modal: false
+    dim: false
+    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+    width: Style.space(320)
+    height: Math.min(menuColumn.implicitHeight + padding * 2, Style.space(560))
+    background: Rectangle {
+      color: Commons.Color.popups.background
+      border.color: Commons.Color.accent
+      border.width: 1
+      radius: Style.cornerRadius
+    }
+    contentItem: Flickable {
+      contentWidth: width
+      contentHeight: menuColumn.implicitHeight
+      clip: true
+      boundsBehavior: Flickable.StopAtBounds
+
+      Column {
+        id: menuColumn
+        width: parent.width
+        spacing: Style.space(2)
+
+        Repeater {
+          model: calendarService && calendarsMenuPopup.opened ? Model.calendarGroups(calendarService.calendars, root.calendarNames) : []
+          Column {
+            id: menuGroup
+            required property var modelData
+            readonly property bool allShown: {
+              for (var i = 0; i < modelData.calendars.length; i++)
+                if (Model.calendarHidden(root.hiddenCalendars, modelData.calendars[i].calendar.id)) return false
+              return true
+            }
+            width: menuColumn.width
+            spacing: Style.space(2)
+
+            Item {
+              width: parent.width
+              height: Style.space(28)
+              Text {
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                text: menuGroup.modelData.label
+                color: Commons.Color.accent
+                font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                font.pixelSize: Style.font.bodySmall
+                font.bold: true
+              }
+              Text {
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                text: menuGroup.allShown ? "Hide all" : "Show all"
+                color: groupToggleMouse.containsMouse ? Commons.Color.accent : Commons.Color.muted
+                font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                font.pixelSize: Style.font.caption
+                MouseArea {
+                  id: groupToggleMouse
+                  anchors.fill: parent
+                  anchors.margins: -Style.space(4)
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.setGroupHidden(menuGroup.modelData, menuGroup.allShown)
+                }
+              }
+            }
+
+            Repeater {
+              model: menuGroup.modelData.calendars
+              Rectangle {
+                id: menuRow
+                required property var modelData
+                readonly property bool shown: !Model.calendarHidden(root.hiddenCalendars, modelData.calendar.id)
+                width: menuGroup.width
+                height: Style.space(28)
+                radius: Style.cornerRadius
+                color: menuRowMouse.containsMouse ? Util.alpha(Commons.Color.foreground, 0.08) : "transparent"
+
+                Rectangle {
+                  id: menuCheck
+                  anchors.left: parent.left
+                  anchors.leftMargin: Style.space(6)
+                  anchors.verticalCenter: parent.verticalCenter
+                  width: Style.space(16)
+                  height: Style.space(16)
+                  radius: Math.min(Style.cornerRadius, Style.space(4))
+                  color: menuRow.shown ? Model.calendarDisplayColor(menuRow.modelData.calendar, root.calendarColors, menuRow.modelData.index) : "transparent"
+                  border.width: 2
+                  border.color: Model.calendarDisplayColor(menuRow.modelData.calendar, root.calendarColors, menuRow.modelData.index)
+                  Text {
+                    anchors.centerIn: parent
+                    visible: menuRow.shown
+                    text: "✓"
+                    color: Model.colorLuminance(parent.color) > 0.55 ? "#000000" : "#ffffff"
+                    font.pixelSize: Style.font.caption
+                    font.bold: true
+                  }
+                }
+                Text {
+                  anchors.left: menuCheck.right
+                  anchors.leftMargin: Style.space(10)
+                  anchors.right: parent.right
+                  anchors.rightMargin: Style.space(6)
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: menuRow.modelData.name
+                  elide: Text.ElideRight
+                  color: menuRow.shown ? Commons.Color.foreground : Commons.Color.muted
+                  font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                  font.pixelSize: Style.font.bodySmall
+                }
+                MouseArea {
+                  id: menuRowMouse
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.setCalendarHidden(menuRow.modelData.calendar.id, menuRow.shown)
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // One account (iCloud, Google, this computer) in the settings page.
+  component SettingsCalendarGroup: Column {
+    id: settingsCalendarGroup
+    property var group: ({ label: "", calendars: [] })
+    readonly property int shownCount: {
+      var count = 0
+      for (var i = 0; i < group.calendars.length; i++)
+        if (!Model.calendarHidden(root.draftHiddenCalendars, group.calendars[i].calendar.id)) count++
+      return count
+    }
+    width: parent ? parent.width : 0
+    spacing: Style.space(4)
+
+    Item {
+      width: parent.width
+      height: Style.spacing.controlHeight
+      Text {
+        anchors.left: parent.left
+        anchors.verticalCenter: parent.verticalCenter
+        text: settingsCalendarGroup.group.label + "  ·  " + settingsCalendarGroup.shownCount + " of " + settingsCalendarGroup.group.calendars.length + " shown"
+        color: Commons.Color.foreground
+        font.family: root.bar ? root.bar.fontFamily : Style.font.family
+        font.pixelSize: Style.font.bodySmall
+        font.bold: true
+      }
+      Row {
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: Style.space(6)
+        Button { text: "Show all"; enabled: settingsCalendarGroup.shownCount < settingsCalendarGroup.group.calendars.length; onClicked: root.setDraftGroupHidden(settingsCalendarGroup.group, false) }
+        Button { text: "Hide all"; enabled: settingsCalendarGroup.shownCount > 0; onClicked: root.setDraftGroupHidden(settingsCalendarGroup.group, true) }
+      }
+    }
+
+    Repeater {
+      model: settingsCalendarGroup.group.calendars
+      SettingsCalendarRow {
+        required property var modelData
+        calendar: modelData.calendar
+        calendarIndex: modelData.index
+      }
+    }
+  }
+
+  // Fixed columns so every row lines up: show/hide, colour, name, note, menu.
+  // Remove sits behind the menu and asks first, so it can't be hit by
+  // misreading which row a button belongs to.
+  component SettingsCalendarRow: Rectangle {
     id: settingsCalendarRow
     property var calendar: ({})
     property int calendarIndex: 0
-
     width: parent ? parent.width : 0
-    spacing: Style.space(8)
-    height: Style.spacing.controlHeight
-
+    height: Style.spacing.controlHeight + Style.space(6)
+    radius: Style.cornerRadius
+    color: rowMouse.containsMouse ? Util.alpha(Commons.Color.foreground, 0.06) : "transparent"
     readonly property string calendarId: calendar && calendar.id ? calendar.id : ""
-    readonly property string sourceLabel: Model.providerLabel(calendar ? calendar.provider : "", calendar ? calendar.host : "") + (calendar && calendar.readonly ? " · read-only" : "")
     readonly property string currentName: Model.calendarDisplayName(calendar, root.draftCalendarNames)
     readonly property string currentColor: Model.calendarDisplayColor(calendar, root.draftCalendarColors, calendarIndex)
     readonly property bool removable: Model.canRemoveCalendar(calendar)
+    readonly property bool shown: !Model.calendarHidden(root.draftHiddenCalendars, calendarId)
+
+    MouseArea {
+      id: rowMouse
+      anchors.fill: parent
+      hoverEnabled: true
+      acceptedButtons: Qt.NoButton
+    }
+
+    ToggleSwitch {
+      id: shownSwitch
+      anchors.left: parent.left
+      anchors.leftMargin: Style.space(4)
+      anchors.verticalCenter: parent.verticalCenter
+      cursorRing: false
+      checked: settingsCalendarRow.shown
+      onToggled: root.setDraftCalendarHidden(settingsCalendarRow.calendarId, settingsCalendarRow.shown)
+    }
 
     Rectangle {
+      id: swatch
+      anchors.left: shownSwitch.right
+      anchors.leftMargin: Style.space(12)
+      anchors.verticalCenter: parent.verticalCenter
       width: Style.space(22)
       height: Style.space(22)
       radius: width / 2
-      anchors.verticalCenter: parent.verticalCenter
       color: settingsCalendarRow.currentColor || Commons.Color.accent
+      opacity: settingsCalendarRow.shown ? 1 : 0.4
       border.width: 2
       border.color: Commons.Color.foreground
-
       MouseArea {
         anchors.fill: parent
         cursorShape: Qt.PointingHandCursor
         onClicked: colorPopup.open()
       }
+      CalendarColorPopup {
+        id: colorPopup
+        objectName: "colorPopup"
+        y: parent.height + Style.space(4)
+        currentColor: settingsCalendarRow.currentColor
+        onPicked: function(color) { root.setDraftCalendarColor(settingsCalendarRow.calendarId, color) }
+      }
+    }
+
+    TextField {
+      id: nameField
+      anchors.left: swatch.right
+      anchors.leftMargin: Style.space(12)
+      anchors.right: noteText.left
+      anchors.rightMargin: Style.space(12)
+      anchors.verticalCenter: parent.verticalCenter
+      height: Style.spacing.controlHeight
+      verticalPadding: Math.max(2, Math.round((Style.spacing.controlHeight - font.pixelSize) / 2) - 2)
+      opacity: settingsCalendarRow.shown ? 1 : 0.55
+      text: settingsCalendarRow.currentName
+      placeholderText: "Calendar name"
+      onEditingFinished: root.setDraftCalendarName(settingsCalendarRow.calendarId, text)
+    }
+
+    Text {
+      id: noteText
+      anchors.right: menuButton.left
+      anchors.rightMargin: Style.space(8)
+      anchors.verticalCenter: parent.verticalCenter
+      width: Style.space(80)
+      horizontalAlignment: Text.AlignRight
+      text: settingsCalendarRow.calendar && settingsCalendarRow.calendar.readonly ? "read-only" : ""
+      color: Commons.Color.muted
+      font.family: root.bar ? root.bar.fontFamily : Style.font.family
+      font.pixelSize: Style.font.caption
+    }
+
+    PanelActionButton {
+      id: menuButton
+      anchors.right: parent.right
+      anchors.rightMargin: Style.space(4)
+      anchors.verticalCenter: parent.verticalCenter
+      opacity: settingsCalendarRow.removable ? 1 : 0
+      enabled: settingsCalendarRow.removable && (!calendarService || !calendarService.pendingRemoveId)
+      iconText: "⋯"
+      tooltipText: "More"
+      onClicked: rowMenu.open()
 
       Popup {
-        id: colorPopup
+        id: rowMenu
+        x: parent.width - width
         y: parent.height + Style.space(4)
         padding: Style.space(6)
         modal: false
@@ -2539,62 +2923,109 @@ Panel {
           border.width: 1
           radius: Style.cornerRadius
         }
-        contentItem: Flow {
-          spacing: Style.space(6)
-          Repeater {
-            model: root.calendarColorPalette
-            Rectangle {
-              required property var modelData
-              width: Style.space(16)
-              height: Style.space(16)
-              radius: width / 2
-              color: modelData
-              border.width: Model.colorsMatch(modelData, settingsCalendarRow.currentColor) ? 2 : 1
-              border.color: Model.colorsMatch(modelData, settingsCalendarRow.currentColor) ? Commons.Color.foreground : Util.alpha(Commons.Color.foreground, 0.35)
-              MouseArea {
-                anchors.fill: parent
-                cursorShape: Qt.PointingHandCursor
-                onClicked: {
-                  root.setDraftCalendarColor(settingsCalendarRow.calendarId, parent.modelData)
-                  colorPopup.close()
+        contentItem: Button {
+          text: "Remove from this computer…"
+          foreground: Commons.Color.urgent
+          onClicked: {
+            rowMenu.close()
+            root.askRemoveCalendar(settingsCalendarRow.calendar, settingsCalendarRow.currentName)
+          }
+        }
+      }
+    }
+  }
+
+  // Palette, theme colours and a hex field. Picking applies to the draft.
+  component CalendarColorPopup: Popup {
+    id: calendarColorPopup
+    property string currentColor: ""
+    signal picked(string color)
+    padding: Style.space(10)
+    modal: false
+    dim: false
+    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+    onOpened: hexField.text = Model.normalizeColor(currentColor)
+    background: Rectangle {
+      color: Commons.Color.popups.background
+      border.color: Commons.Color.accent
+      border.width: 1
+      radius: Style.cornerRadius
+    }
+    contentItem: Column {
+      spacing: Style.space(8)
+      width: Style.space(250)
+
+      Repeater {
+        model: [
+          { label: "Colours", colors: root.calendarColorPalette },
+          { label: "Theme", colors: root.uniqueThemeColors() }
+        ]
+        Column {
+          required property var modelData
+          spacing: Style.space(4)
+          Text {
+            text: modelData.label
+            color: Commons.Color.muted
+            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            font.pixelSize: Style.font.caption
+          }
+          Flow {
+            width: Style.space(250)
+            spacing: Style.space(6)
+            Repeater {
+              model: modelData.colors
+              Rectangle {
+                required property var modelData
+                readonly property bool current: Model.colorsMatch(modelData, calendarColorPopup.currentColor)
+                width: Style.space(22)
+                height: Style.space(22)
+                radius: width / 2
+                color: modelData
+                border.width: current ? 2 : 1
+                border.color: current ? Commons.Color.foreground : Util.alpha(Commons.Color.foreground, 0.35)
+                MouseArea {
+                  anchors.fill: parent
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: {
+                    calendarColorPopup.picked(Model.normalizeColor(parent.modelData))
+                    calendarColorPopup.close()
+                  }
                 }
               }
             }
           }
         }
       }
-    }
-    TextField {
-      width: Style.space(200)
-      height: Style.spacing.controlHeight
-      verticalPadding: Math.max(2, Math.round((Style.spacing.controlHeight - font.pixelSize) / 2) - 2)
-      text: settingsCalendarRow.currentName
-      placeholderText: "Calendar name"
-      onEditingFinished: root.setDraftCalendarName(settingsCalendarRow.calendarId, text)
-    }
-    Text {
-      id: sourceText
-      anchors.verticalCenter: parent.verticalCenter
-      text: settingsCalendarRow.sourceLabel
-      textFormat: Text.PlainText
-      color: Commons.Color.foreground
-      font.family: root.bar ? root.bar.fontFamily : Style.font.family
-      font.pixelSize: Style.font.caption
-    }
-    Item {
-      width: Math.max(Style.space(8), parent.width - Style.space(222) - sourceText.implicitWidth - (settingsCalendarRow.removable ? removeCalendarButton.implicitWidth : 0) - parent.spacing * (settingsCalendarRow.removable ? 4 : 3))
-      height: 1
-    }
-    Button {
-      id: removeCalendarButton
-      visible: settingsCalendarRow.removable
-      enabled: !calendarService || !calendarService.pendingRemoveId
-      anchors.verticalCenter: parent.verticalCenter
-      text: calendarService && calendarService.pendingRemoveId === settingsCalendarRow.calendarId ? "Removing" : "Remove"
-      bordered: true
-      onClicked: {
-        if (root.draftDefaultCalendarId === settingsCalendarRow.calendarId) root.draftDefaultCalendarId = ""
-        if (calendarService) calendarService.removeCalendar(settingsCalendarRow.calendarId)
+
+      Row {
+        spacing: Style.space(6)
+        Rectangle {
+          width: Style.space(22)
+          height: Style.space(22)
+          radius: width / 2
+          anchors.verticalCenter: parent.verticalCenter
+          color: Model.hexColorInput(hexField.text) || "transparent"
+          border.width: 1
+          border.color: Util.alpha(Commons.Color.foreground, 0.35)
+        }
+        TextField {
+          id: hexField
+          width: Style.space(130)
+          placeholderText: "#rrggbb"
+          onAccepted: hexApply.clicked()
+        }
+        Button {
+          id: hexApply
+          text: "Use"
+          bordered: true
+          enabled: Model.hexColorInput(hexField.text) !== ""
+          onClicked: {
+            var color = Model.hexColorInput(hexField.text)
+            if (!color) return
+            calendarColorPopup.picked(color)
+            calendarColorPopup.close()
+          }
+        }
       }
     }
   }
