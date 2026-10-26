@@ -336,4 +336,7 @@ assert.deepEqual(groups.map(group => group.label), ['Google', 'iCloud', 'On this
 assert.deepEqual(groups[1].calendars.map(entry => entry.calendar.id), ['z', 'a'])
 assert.equal(groups[1].calendars[0].index, 1)
 
+assert.equal(model.calendarDisplayColor({ id: 'm', color: '#FFCC00FF' }, {}, 0), '#ffcc00')
+assert.equal(model.calendarDisplayColor({ id: 'p', color: '#000000FF' }, { p: '#1E66F5' }, 0), '#1e66f5')
+
 console.log('ok - calendar model')

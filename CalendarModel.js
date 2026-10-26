@@ -617,8 +617,10 @@ function calendarDisplayName(calendar, names) {
 function calendarDisplayColor(calendar, colors, index) {
   if (!calendar) return DEFAULT_CALENDAR_COLORS[0]
   var overrides = colors || {}
-  if (overrides[calendar.id]) return String(overrides[calendar.id])
-  if (calendar.color) return String(calendar.color)
+  // EDS and CalDAV store #RRGGBBAA, which Qt would read as #AARRGGBB, so
+  // always hand QML a plain #rrggbb.
+  if (overrides[calendar.id]) return normalizeColor(overrides[calendar.id]) || String(overrides[calendar.id])
+  if (calendar.color) return normalizeColor(calendar.color) || String(calendar.color)
   return DEFAULT_CALENDAR_COLORS[Math.abs(index || 0) % DEFAULT_CALENDAR_COLORS.length]
 }
 
