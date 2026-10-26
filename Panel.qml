@@ -3843,16 +3843,20 @@ Panel {
     readonly property bool saving: !!(event && event.status === "saving")
     readonly property bool showTime: mode === "block" ? height >= Style.space(36) : mode === "row"
     readonly property bool wrapTitle: mode === "block" && height >= Style.space(48)
-    readonly property real fillStrength: 0.72
-    readonly property color labelColor: Model.contrastingForeground(card.accentColor, card.fillStrength, Commons.Color.foreground, Commons.Color.popups.background)
+    // All-day entries are a light tint with an outline, so timed events
+    // stand out against them.
+    readonly property bool allDay: !!(event && event.allDay === true)
+    readonly property real fillStrength: allDay ? 0.2 : 0.72
+    readonly property color labelColor: allDay ? Commons.Color.foreground : Model.contrastingForeground(card.accentColor, card.fillStrength, Commons.Color.foreground, Commons.Color.popups.background)
 
     radius: mode === "chip" ? Style.space(3) : Style.cornerRadius
     opacity: (card.dimmed ? 0.65 : 1) * (card.saving ? 0.72 : 1)
-    border.width: card.saving ? 1 : 0
-    border.color: Commons.Color.accent
+    border.width: card.saving || card.allDay ? 1 : 0
+    border.color: card.saving ? Commons.Color.accent : Util.alpha(card.accentColor, 0.7)
     color: Util.alpha(card.accentColor, cardMouse.containsMouse ? Math.min(1, card.fillStrength + 0.1) : card.fillStrength)
 
     Rectangle {
+      visible: !card.allDay
       width: Style.space(3)
       height: parent.height
       radius: Style.space(2)
@@ -3941,7 +3945,7 @@ Panel {
         anchors.verticalCenter: parent.verticalCenter
         text: Model.eventListTime(card.event, root.selectedKey, root.timeFormat)
         textFormat: Text.PlainText
-        color: card.labelColor
+        color: card.allDay ? Commons.Color.muted : card.labelColor
         elide: Text.ElideRight
         font.family: root.bar ? root.bar.fontFamily : Style.font.family
         font.pixelSize: Style.font.caption
@@ -3954,8 +3958,8 @@ Panel {
         color: card.labelColor
         elide: Text.ElideRight
         font.family: root.bar ? root.bar.fontFamily : Style.font.family
-        font.pixelSize: Style.font.bodySmall
-        font.bold: true
+        font.pixelSize: card.allDay ? Style.font.caption : Style.font.bodySmall
+        font.bold: !card.allDay
       }
     }
 
@@ -3986,7 +3990,7 @@ Panel {
       EventCard {
         required property var modelData
         width: eventList.width
-        height: Style.space(28)
+        height: modelData && modelData.allDay ? Style.space(20) : Style.space(28)
         mode: "row"
         event: modelData
         onClicked: function(mouse) { root.handleEventClick(event, mouse, this) }
