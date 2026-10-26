@@ -2937,29 +2937,186 @@ Panel {
     }
   }
 
-  // Palette, theme colours and a hex field. Picking applies to the draft.
+  // Colour picker: a saturation/brightness square with a hue strip, presets,
+  // theme colours and a hex field. Picking applies to the draft.
   component CalendarColorPopup: Popup {
     id: calendarColorPopup
     property string currentColor: ""
+    property real hue: 0
+    property real sat: 0
+    property real val: 1
+    readonly property color chosen: Qt.hsva(hue, sat, val, 1)
+    readonly property string chosenHex: Model.normalizeColor(String(chosen))
+    property bool editingHex: false
     signal picked(string color)
-    padding: Style.space(10)
+
+    // Keep the whole popup inside the window: near the bottom of the list it
+    // moves up instead of being cut off.
+    margins: Style.space(8)
+    padding: Style.space(12)
     modal: false
     dim: false
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-    onOpened: hexField.text = Model.normalizeColor(currentColor)
+    onOpened: loadColor(currentColor)
+    onChosenHexChanged: if (!editingHex) hexField.text = chosenHex
+
+    function loadColor(text) {
+      var hex = Model.hexColorInput(text)
+      if (!hex) return
+      var c = Qt.color(hex)
+      if (c.hsvHue >= 0) hue = c.hsvHue
+      sat = c.hsvSaturation
+      val = c.hsvValue
+      hexField.text = hex
+    }
+
+    function choose(color) {
+      picked(color)
+      close()
+    }
+
     background: Rectangle {
       color: Commons.Color.popups.background
       border.color: Commons.Color.accent
       border.width: 1
       radius: Style.cornerRadius
     }
+
     contentItem: Column {
-      spacing: Style.space(8)
-      width: Style.space(250)
+      spacing: Style.space(10)
+      width: Style.space(300)
+
+      Row {
+        spacing: Style.space(10)
+
+        // Saturation runs left to right, brightness top to bottom.
+        Item {
+          id: svSquare
+          width: Style.space(250)
+          height: Style.space(160)
+
+          Rectangle {
+            anchors.fill: parent
+            radius: Style.cornerRadius
+            color: Qt.hsva(calendarColorPopup.hue, 1, 1, 1)
+          }
+          Rectangle {
+            anchors.fill: parent
+            radius: Style.cornerRadius
+            gradient: Gradient {
+              orientation: Gradient.Horizontal
+              GradientStop { position: 0; color: "#ffffffff" }
+              GradientStop { position: 1; color: "#00ffffff" }
+            }
+          }
+          Rectangle {
+            anchors.fill: parent
+            radius: Style.cornerRadius
+            gradient: Gradient {
+              GradientStop { position: 0; color: "#00000000" }
+              GradientStop { position: 1; color: "#ff000000" }
+            }
+          }
+          Rectangle {
+            width: Style.space(14)
+            height: width
+            radius: width / 2
+            x: calendarColorPopup.sat * svSquare.width - width / 2
+            y: (1 - calendarColorPopup.val) * svSquare.height - height / 2
+            color: calendarColorPopup.chosen
+            border.width: 2
+            border.color: calendarColorPopup.val > 0.55 ? "#000000" : "#ffffff"
+          }
+          MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.CrossCursor
+            function pick(mouse) {
+              calendarColorPopup.editingHex = false
+              calendarColorPopup.sat = Math.max(0, Math.min(1, mouse.x / width))
+              calendarColorPopup.val = Math.max(0, Math.min(1, 1 - mouse.y / height))
+            }
+            onPressed: function(mouse) { pick(mouse) }
+            onPositionChanged: function(mouse) { if (pressed) pick(mouse) }
+          }
+        }
+
+        Item {
+          id: hueStrip
+          width: Style.space(22)
+          height: svSquare.height
+
+          Rectangle {
+            anchors.fill: parent
+            radius: Style.cornerRadius
+            gradient: Gradient {
+              GradientStop { position: 0.0; color: "#ff0000" }
+              GradientStop { position: 0.167; color: "#ffff00" }
+              GradientStop { position: 0.333; color: "#00ff00" }
+              GradientStop { position: 0.5; color: "#00ffff" }
+              GradientStop { position: 0.667; color: "#0000ff" }
+              GradientStop { position: 0.833; color: "#ff00ff" }
+              GradientStop { position: 1.0; color: "#ff0000" }
+            }
+          }
+          Rectangle {
+            x: -Style.space(2)
+            width: parent.width + Style.space(4)
+            height: Style.space(6)
+            radius: height / 2
+            y: calendarColorPopup.hue * hueStrip.height - height / 2
+            color: "transparent"
+            border.width: 2
+            border.color: Commons.Color.foreground
+          }
+          MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.PointingHandCursor
+            function pick(mouse) {
+              calendarColorPopup.editingHex = false
+              calendarColorPopup.hue = Math.max(0, Math.min(0.999, mouse.y / height))
+            }
+            onPressed: function(mouse) { pick(mouse) }
+            onPositionChanged: function(mouse) { if (pressed) pick(mouse) }
+          }
+        }
+      }
+
+      Row {
+        spacing: Style.space(8)
+        Rectangle {
+          width: Style.space(34)
+          height: Style.spacing.controlHeight
+          radius: Style.cornerRadius
+          anchors.verticalCenter: parent.verticalCenter
+          color: calendarColorPopup.chosen
+          border.width: 1
+          border.color: Util.alpha(Commons.Color.foreground, 0.35)
+        }
+        TextField {
+          id: hexField
+          width: Style.space(130)
+          placeholderText: "#rrggbb"
+          onTextEdited: {
+            var hex = Model.hexColorInput(text)
+            if (!hex) return
+            calendarColorPopup.editingHex = true
+            calendarColorPopup.loadColor(hex)
+            calendarColorPopup.editingHex = false
+          }
+          onAccepted: useButton.clicked()
+        }
+        Button {
+          id: useButton
+          text: "Use colour"
+          bordered: true
+          selected: true
+          onClicked: calendarColorPopup.choose(calendarColorPopup.chosenHex)
+        }
+      }
 
       Repeater {
         model: [
-          { label: "Colours", colors: root.calendarColorPalette },
+          { label: "Presets", colors: root.calendarColorPalette },
           { label: "Theme", colors: root.uniqueThemeColors() }
         ]
         Column {
@@ -2972,15 +3129,15 @@ Panel {
             font.pixelSize: Style.font.caption
           }
           Flow {
-            width: Style.space(250)
-            spacing: Style.space(6)
+            width: Style.space(300)
+            spacing: Style.space(5)
             Repeater {
               model: modelData.colors
               Rectangle {
                 required property var modelData
-                readonly property bool current: Model.colorsMatch(modelData, calendarColorPopup.currentColor)
-                width: Style.space(22)
-                height: Style.space(22)
+                readonly property bool current: Model.colorsMatch(modelData, calendarColorPopup.chosenHex)
+                width: Style.space(20)
+                height: Style.space(20)
                 radius: width / 2
                 color: modelData
                 border.width: current ? 2 : 1
@@ -2988,44 +3145,12 @@ Panel {
                 MouseArea {
                   anchors.fill: parent
                   cursorShape: Qt.PointingHandCursor
-                  onClicked: {
-                    calendarColorPopup.picked(Model.normalizeColor(parent.modelData))
-                    calendarColorPopup.close()
-                  }
+                  // One click previews in the picker, a double click uses it.
+                  onClicked: calendarColorPopup.loadColor(parent.modelData)
+                  onDoubleClicked: calendarColorPopup.choose(Model.normalizeColor(parent.modelData))
                 }
               }
             }
-          }
-        }
-      }
-
-      Row {
-        spacing: Style.space(6)
-        Rectangle {
-          width: Style.space(22)
-          height: Style.space(22)
-          radius: width / 2
-          anchors.verticalCenter: parent.verticalCenter
-          color: Model.hexColorInput(hexField.text) || "transparent"
-          border.width: 1
-          border.color: Util.alpha(Commons.Color.foreground, 0.35)
-        }
-        TextField {
-          id: hexField
-          width: Style.space(130)
-          placeholderText: "#rrggbb"
-          onAccepted: hexApply.clicked()
-        }
-        Button {
-          id: hexApply
-          text: "Use"
-          bordered: true
-          enabled: Model.hexColorInput(hexField.text) !== ""
-          onClicked: {
-            var color = Model.hexColorInput(hexField.text)
-            if (!color) return
-            calendarColorPopup.picked(color)
-            calendarColorPopup.close()
           }
         }
       }
