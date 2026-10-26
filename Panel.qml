@@ -1,4 +1,5 @@
 import QtQuick
+import qs.Commons as Commons
 import QtQuick.Controls
 import Quickshell
 import qs.Commons
@@ -492,7 +493,7 @@ Panel {
   }
 
   function eventColor(event) {
-    if (!event) return Color.accent
+    if (!event) return Commons.Color.accent
     var calendar = calendarService ? calendarService.calendarById(event.calendarId) : null
     var index = 0
     if (calendarService) {
@@ -920,7 +921,7 @@ Panel {
                   Text {
                     width: parent.width
                     text: root.headline
-                    color: Color.foreground
+                    color: Commons.Color.foreground
                     horizontalAlignment: Text.AlignHCenter
                     elide: Text.ElideRight
                     font.family: root.bar ? root.bar.fontFamily : Style.font.family
@@ -937,7 +938,7 @@ Panel {
                   Text {
                     width: parent.width
                     text: calendarService ? ((calendarService.syncing ? "Syncing" : (calendarService.lastSyncText === "Cached" || calendarService.lastSyncText === "Never synced" ? calendarService.lastSyncText : "Synced " + calendarService.lastSyncText)) + " · " + calendarService.calendars.length + " calendars") : "Calendar service not loaded"
-                    color: Color.muted
+                    color: Commons.Color.muted
                     horizontalAlignment: Text.AlignHCenter
                     elide: Text.ElideRight
                     font.family: root.bar ? root.bar.fontFamily : Style.font.family
@@ -994,8 +995,8 @@ Panel {
               width: parent.width
               height: createForm.implicitHeight + Style.space(20)
               radius: Style.cornerRadius
-              color: Style.hoverFillFor(Color.foreground, Color.accent)
-              border.color: Color.accent
+              color: Style.hoverFillFor(Commons.Color.foreground, Commons.Color.accent)
+              border.color: Commons.Color.accent
               border.width: 1
 
               Column {
@@ -1009,7 +1010,7 @@ Panel {
                   text: root.editingEvent
                     ? (root.editScope === "all" && root.eventIsRecurring(root.editingEvent) ? "Edit series" : "Edit event")
                     : "New event"
-                  color: Color.foreground
+                  color: Commons.Color.foreground
                   font.family: root.bar ? root.bar.fontFamily : Style.font.family
                   font.pixelSize: Style.font.body
                   font.bold: true
@@ -1028,7 +1029,7 @@ Panel {
                     spacing: Style.space(4)
                     Text {
                       text: "All day"
-                      color: Color.foreground
+                      color: Commons.Color.foreground
                       font.family: root.bar ? root.bar.fontFamily : Style.font.family
                       font.pixelSize: Style.font.caption
                       font.bold: true
@@ -1049,7 +1050,7 @@ Panel {
                     anchors.bottom: parent.bottom
                     anchors.bottomMargin: Style.space(6)
                     text: "–"
-                    color: Color.muted
+                    color: Commons.Color.muted
                     font.family: root.bar ? root.bar.fontFamily : Style.font.family
                     font.pixelSize: Style.font.body
                   }
@@ -1068,7 +1069,7 @@ Panel {
 
                   Text {
                     text: "Repeat"
-                    color: Color.foreground
+                    color: Commons.Color.foreground
                     font.family: root.bar ? root.bar.fontFamily : Style.font.family
                     font.pixelSize: Style.font.caption
                     font.bold: true
@@ -1090,8 +1091,8 @@ Panel {
                         { value: "monthly", label: "Monthly" },
                         { value: "yearly", label: "Yearly" }
                       ]
-                      foreground: Color.foreground
-                      background: Color.popups.background
+                      foreground: Commons.Color.foreground
+                      background: Commons.Color.popups.background
                       onChanged: function(value) {
                         root.setRecurrenceFreq(value)
                         root.restoreRecurrenceDropdownBinding(recurrenceFrequencyDropdown, "freq")
@@ -1105,7 +1106,7 @@ Panel {
                       Text {
                         anchors.verticalCenter: parent.verticalCenter
                         text: "every"
-                        color: Color.foreground
+                        color: Commons.Color.foreground
                         font.family: root.bar ? root.bar.fontFamily : Style.font.family
                         font.pixelSize: Style.font.bodySmall
                       }
@@ -1123,7 +1124,7 @@ Panel {
                       Text {
                         anchors.verticalCenter: parent.verticalCenter
                         text: root.recurrenceIntervalLabel()
-                        color: Color.foreground
+                        color: Commons.Color.foreground
                         font.family: root.bar ? root.bar.fontFamily : Style.font.family
                         font.pixelSize: Style.font.bodySmall
                       }
@@ -1141,8 +1142,8 @@ Panel {
                           { value: "bymonthday", label: "On day" },
                           { value: "byday", label: "On the" }
                         ]
-                        foreground: Color.foreground
-                        background: Color.popups.background
+                        foreground: Commons.Color.foreground
+                        background: Commons.Color.popups.background
                         onChanged: function(value) {
                           root.patchRecurrence({ monthlyMode: value })
                           root.restoreRecurrenceDropdownBinding(recurrenceMonthlyModeDropdown, "monthlyMode")
@@ -1155,8 +1156,8 @@ Panel {
                         showLabel: false
                         value: String(root.createRecurrence.monthDay)
                         options: Model.monthDayOptions()
-                        foreground: Color.foreground
-                        background: Color.popups.background
+                        foreground: Commons.Color.foreground
+                        background: Commons.Color.popups.background
                         onChanged: function(value) {
                           root.patchRecurrence({ monthDay: parseInt(value, 10) || 1 })
                           root.restoreRecurrenceDropdownBinding(recurrenceMonthlyDayDropdown, "monthDay")
@@ -1169,8 +1170,8 @@ Panel {
                         showLabel: false
                         value: String(root.createRecurrence.bysetpos)
                         options: Model.ordinalOptions()
-                        foreground: Color.foreground
-                        background: Color.popups.background
+                        foreground: Commons.Color.foreground
+                        background: Commons.Color.popups.background
                         onChanged: function(value) {
                           root.patchRecurrence({ bysetpos: parseInt(value, 10) || 1 })
                           root.restoreRecurrenceDropdownBinding(recurrenceMonthlyOrdinalDropdown, "bysetpos")
@@ -1183,8 +1184,8 @@ Panel {
                         showLabel: false
                         value: String(root.createRecurrence.weekday)
                         options: Model.weekdayNameOptions()
-                        foreground: Color.foreground
-                        background: Color.popups.background
+                        foreground: Commons.Color.foreground
+                        background: Commons.Color.popups.background
                         onChanged: function(value) {
                           root.patchRecurrence({ weekday: parseInt(value, 10) || 0 })
                           root.restoreRecurrenceDropdownBinding(recurrenceMonthlyWeekdayDropdown, "weekday")
@@ -1204,8 +1205,8 @@ Panel {
                           { value: "bymonthday", label: "On" },
                           { value: "byday", label: "On the" }
                         ]
-                        foreground: Color.foreground
-                        background: Color.popups.background
+                        foreground: Commons.Color.foreground
+                        background: Commons.Color.popups.background
                         onChanged: function(value) {
                           root.patchRecurrence({ yearlyMode: value })
                           root.restoreRecurrenceDropdownBinding(recurrenceYearlyModeDropdown, "yearlyMode")
@@ -1218,8 +1219,8 @@ Panel {
                         showLabel: false
                         value: String(root.createRecurrence.bysetpos)
                         options: Model.ordinalOptions()
-                        foreground: Color.foreground
-                        background: Color.popups.background
+                        foreground: Commons.Color.foreground
+                        background: Commons.Color.popups.background
                         onChanged: function(value) {
                           root.patchRecurrence({ bysetpos: parseInt(value, 10) || 1 })
                           root.restoreRecurrenceDropdownBinding(recurrenceYearlyOrdinalDropdown, "bysetpos")
@@ -1232,8 +1233,8 @@ Panel {
                         showLabel: false
                         value: String(root.createRecurrence.weekday)
                         options: Model.weekdayNameOptions()
-                        foreground: Color.foreground
-                        background: Color.popups.background
+                        foreground: Commons.Color.foreground
+                        background: Commons.Color.popups.background
                         onChanged: function(value) {
                           root.patchRecurrence({ weekday: parseInt(value, 10) || 0 })
                           root.restoreRecurrenceDropdownBinding(recurrenceYearlyWeekdayDropdown, "weekday")
@@ -1245,8 +1246,8 @@ Panel {
                         showLabel: false
                         value: String(root.createRecurrence.month)
                         options: Model.monthNameOptions()
-                        foreground: Color.foreground
-                        background: Color.popups.background
+                        foreground: Commons.Color.foreground
+                        background: Commons.Color.popups.background
                         onChanged: function(value) {
                           root.patchRecurrence({ month: parseInt(value, 10) || 1 })
                           root.restoreRecurrenceDropdownBinding(recurrenceYearlyMonthDropdown, "month")
@@ -1259,8 +1260,8 @@ Panel {
                         showLabel: false
                         value: String(root.createRecurrence.monthDay)
                         options: Model.monthDayOptions()
-                        foreground: Color.foreground
-                        background: Color.popups.background
+                        foreground: Commons.Color.foreground
+                        background: Commons.Color.popups.background
                         onChanged: function(value) {
                           root.patchRecurrence({ monthDay: parseInt(value, 10) || 1 })
                           root.restoreRecurrenceDropdownBinding(recurrenceYearlyDayDropdown, "monthDay")
@@ -1275,7 +1276,7 @@ Panel {
                       Text {
                         anchors.verticalCenter: parent.verticalCenter
                         text: "ends"
-                        color: Color.foreground
+                        color: Commons.Color.foreground
                         font.family: root.bar ? root.bar.fontFamily : Style.font.family
                         font.pixelSize: Style.font.bodySmall
                       }
@@ -1289,8 +1290,8 @@ Panel {
                           { value: "until", label: "On date" },
                           { value: "count", label: "After" }
                         ]
-                        foreground: Color.foreground
-                        background: Color.popups.background
+                        foreground: Commons.Color.foreground
+                        background: Commons.Color.popups.background
                         onChanged: function(value) {
                           root.patchRecurrence({ end: value })
                           root.restoreRecurrenceDropdownBinding(recurrenceEndDropdown, "end")
@@ -1319,7 +1320,7 @@ Panel {
                         visible: root.createRecurrence.end === "count"
                         anchors.verticalCenter: parent.verticalCenter
                         text: root.createRecurrence.count === 1 ? "time" : "times"
-                        color: Color.foreground
+                        color: Commons.Color.foreground
                         font.family: root.bar ? root.bar.fontFamily : Style.font.family
                         font.pixelSize: Style.font.bodySmall
                       }
@@ -1344,7 +1345,7 @@ Panel {
                     visible: root.createRecurrence.freq !== "never"
                     width: parent.width
                     text: Model.summarizeRecurrence(root.createRecurrence, root.createDateKey)
-                    color: Color.foreground
+                    color: Commons.Color.foreground
                     wrapMode: Text.WordWrap
                     font.family: root.bar ? root.bar.fontFamily : Style.font.family
                     font.pixelSize: Style.font.caption
@@ -1356,7 +1357,7 @@ Panel {
                    spacing: Style.space(4)
                    Text {
                      text: "Meeting"
-                     color: Color.foreground
+                     color: Commons.Color.foreground
                      font.family: root.bar ? root.bar.fontFamily : Style.font.family
                      font.pixelSize: Style.font.caption
                      font.bold: true
@@ -1379,7 +1380,7 @@ Panel {
                     spacing: Style.space(4)
                     Text {
                       text: "Location"
-                      color: Color.foreground
+                      color: Commons.Color.foreground
                       font.family: root.bar ? root.bar.fontFamily : Style.font.family
                       font.pixelSize: Style.font.caption
                       font.bold: true
@@ -1400,7 +1401,7 @@ Panel {
                     spacing: Style.space(4)
                     Text {
                       text: "Calendar"
-                      color: Color.foreground
+                      color: Commons.Color.foreground
                       font.family: root.bar ? root.bar.fontFamily : Style.font.family
                       font.pixelSize: Style.font.caption
                       font.bold: true
@@ -1413,8 +1414,8 @@ Panel {
                       showLabel: false
                       value: root.createCalendarId
                       options: root.writableCalendarOptions()
-                      foreground: Color.foreground
-                      background: Color.popups.background
+                      foreground: Commons.Color.foreground
+                      background: Commons.Color.popups.background
                       onChanged: function(value) {
                         root.createCalendarId = value
                         createCalendarDropdown.value = Qt.binding(function() { return root.createCalendarId })
@@ -1428,7 +1429,7 @@ Panel {
                   width: parent.width
                    text: root.createError
                    textFormat: Text.PlainText
-                  color: Color.urgent
+                  color: Commons.Color.urgent
                   wrapMode: Text.WordWrap
                   font.family: root.bar ? root.bar.fontFamily : Style.font.family
                   font.pixelSize: Style.font.bodySmall
@@ -1453,7 +1454,7 @@ Panel {
               width: parent.width
               text: calendarService ? calendarService.errorMessage : ""
               textFormat: Text.PlainText
-              color: Color.urgent
+              color: Commons.Color.urgent
               wrapMode: Text.WordWrap
               font.family: root.bar ? root.bar.fontFamily : Style.font.family
             }
@@ -1462,7 +1463,7 @@ Panel {
               visible: !root.showingSettings && root.edsLoading
               width: parent.width
               text: "Starting Evolution Data Server…"
-              color: Color.muted
+              color: Commons.Color.muted
               wrapMode: Text.WordWrap
               font.family: root.bar ? root.bar.fontFamily : Style.font.family
               font.pixelSize: Style.font.body
@@ -1475,7 +1476,7 @@ Panel {
               Text {
                 width: parent.width
                 text: calendarService ? calendarService.errorMessage : "Couldn't start Evolution Data Server. Try Sync."
-                color: Color.urgent
+                color: Commons.Color.urgent
                 wrapMode: Text.WordWrap
                 font.family: root.bar ? root.bar.fontFamily : Style.font.family
                 font.pixelSize: Style.font.body
@@ -1502,7 +1503,7 @@ Panel {
                 Text {
                   width: parent.width
                   text: "Evolution Data Server is not installed."
-                  color: Color.urgent
+                  color: Commons.Color.urgent
                   wrapMode: Text.WordWrap
                   font.family: root.bar ? root.bar.fontFamily : Style.font.family
                   font.pixelSize: Style.font.body
@@ -1511,7 +1512,7 @@ Panel {
                 Text {
                   width: parent.width
                   text: "It is required to store calendar data locally."
-                  color: Color.urgent
+                  color: Commons.Color.urgent
                   wrapMode: Text.WordWrap
                   font.family: root.bar ? root.bar.fontFamily : Style.font.family
                   font.pixelSize: Style.font.bodySmall
@@ -1531,10 +1532,10 @@ Panel {
                   height: edsInstallInner.implicitHeight + Style.space(20)
                   radius: Style.cornerRadius
                   border.width: 1
-                  border.color: edsInstallMouse.containsMouse ? Color.accent : Util.alpha(Color.foreground, 0.28)
-                  color: edsInstallMouse.pressed ? Style.pressedFillFor(Color.foreground, Color.accent)
-                    : edsInstallMouse.containsMouse ? Style.hoverFillFor(Color.foreground, Color.accent)
-                    : Style.normalFillFor(Color.foreground, Color.accent, Color.urgent)
+                  border.color: edsInstallMouse.containsMouse ? Commons.Color.accent : Util.alpha(Commons.Color.foreground, 0.28)
+                  color: edsInstallMouse.pressed ? Style.pressedFillFor(Commons.Color.foreground, Commons.Color.accent)
+                    : edsInstallMouse.containsMouse ? Style.hoverFillFor(Commons.Color.foreground, Commons.Color.accent)
+                    : Style.normalFillFor(Commons.Color.foreground, Commons.Color.accent, Commons.Color.urgent)
 
                   Column {
                     id: edsInstallInner
@@ -1543,7 +1544,7 @@ Panel {
                     Text {
                       anchors.horizontalCenter: parent.horizontalCenter
                       text: "Click to install"
-                      color: Color.foreground
+                      color: Commons.Color.foreground
                       font.family: root.bar ? root.bar.fontFamily : Style.font.family
                       font.pixelSize: Style.font.body
                       font.bold: true
@@ -1551,7 +1552,7 @@ Panel {
                     Text {
                       anchors.horizontalCenter: parent.horizontalCenter
                       text: "omarchy pkg add evolution-data-server"
-                      color: Util.alpha(Color.foreground, 0.5)
+                      color: Util.alpha(Commons.Color.foreground, 0.5)
                       font.family: "monospace"
                       font.pixelSize: Style.font.caption
                     }
@@ -1574,9 +1575,9 @@ Panel {
                   height: edsSourceInner.implicitHeight + Style.space(12)
                     radius: Style.cornerRadius
                     border.width: 1
-                    border.color: edsSourceMouse.containsMouse ? Color.accent : Util.alpha(Color.foreground, 0.28)
-                    color: edsSourceMouse.pressed ? Style.pressedFillFor(Color.foreground, Color.accent)
-                      : edsSourceMouse.containsMouse ? Style.hoverFillFor(Color.foreground, Color.accent)
+                    border.color: edsSourceMouse.containsMouse ? Commons.Color.accent : Util.alpha(Commons.Color.foreground, 0.28)
+                    color: edsSourceMouse.pressed ? Style.pressedFillFor(Commons.Color.foreground, Commons.Color.accent)
+                      : edsSourceMouse.containsMouse ? Style.hoverFillFor(Commons.Color.foreground, Commons.Color.accent)
                       : "transparent"
 
                     Row {
@@ -1585,14 +1586,14 @@ Panel {
                       spacing: Style.space(8)
                     Text {
                       text: "SOURCE"
-                      color: Color.foreground
+                      color: Commons.Color.foreground
                       font.family: root.bar ? root.bar.fontFamily : Style.font.family
                       font.pixelSize: Style.font.caption
                       font.bold: true
                     }
                     Text {
                       text: "↗"
-                      color: Color.foreground
+                      color: Commons.Color.foreground
                       font.family: root.bar ? root.bar.fontFamily : Style.font.family
                       font.pixelSize: Style.font.body
                     }
@@ -1649,8 +1650,8 @@ Panel {
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
 
         background: Rectangle {
-          color: Color.popups.background
-          border.color: Color.accent
+          color: Commons.Color.popups.background
+          border.color: Commons.Color.accent
           border.width: 1
           radius: Style.cornerRadius
         }
@@ -1715,7 +1716,7 @@ Panel {
     width: Math.max(Style.space(160), menuLabel.implicitWidth + Style.space(20))
     height: Style.space(28)
     radius: Style.cornerRadius
-    color: menuMouse.containsMouse ? Style.hoverFillFor(Color.foreground, Color.accent) : "transparent"
+    color: menuMouse.containsMouse ? Style.hoverFillFor(Commons.Color.foreground, Commons.Color.accent) : "transparent"
 
     Text {
       id: menuLabel
@@ -1723,7 +1724,7 @@ Panel {
       anchors.left: parent.left
       anchors.leftMargin: Style.space(8)
       text: menuItem.text
-      color: Color.foreground
+      color: Commons.Color.foreground
       font.family: root.bar ? root.bar.fontFamily : Style.font.family
       font.pixelSize: Style.font.bodySmall
     }
@@ -1746,15 +1747,15 @@ Panel {
     width: Style.space(28)
     height: Style.space(28)
     radius: width / 2
-    color: mouse.pressed ? Style.pressedFillFor(Color.foreground, Color.accent)
-      : selected ? Style.selectedFillFor(Color.foreground, Color.accent)
-      : mouse.containsMouse ? Style.hoverFillFor(Color.foreground, Color.accent)
-      : Style.normalFillFor(Color.foreground, Color.accent, Color.urgent)
+    color: mouse.pressed ? Style.pressedFillFor(Commons.Color.foreground, Commons.Color.accent)
+      : selected ? Style.selectedFillFor(Commons.Color.foreground, Commons.Color.accent)
+      : mouse.containsMouse ? Style.hoverFillFor(Commons.Color.foreground, Commons.Color.accent)
+      : Style.normalFillFor(Commons.Color.foreground, Commons.Color.accent, Commons.Color.urgent)
 
     Text {
       anchors.centerIn: parent
       text: root.weekdayLabel(weekdayChip.day).charAt(0)
-      color: weekdayChip.selected ? Style.selectedStateColor(Color.foreground, Color.accent) : Color.foreground
+      color: weekdayChip.selected ? Style.selectedStateColor(Commons.Color.foreground, Commons.Color.accent) : Commons.Color.foreground
       font.family: root.bar ? root.bar.fontFamily : Style.font.family
       font.pixelSize: Style.font.caption
       font.bold: weekdayChip.selected
@@ -1783,7 +1784,7 @@ Panel {
     Text {
       visible: datePicker.showLabel && datePicker.label !== ""
       text: datePicker.label
-      color: Color.foreground
+      color: Commons.Color.foreground
       font.family: root.bar ? root.bar.fontFamily : Style.font.family
       font.pixelSize: Style.font.caption
       font.bold: true
@@ -1793,14 +1794,14 @@ Panel {
       width: parent.width
       height: Style.space(28)
       radius: Style.cornerRadius
-      color: dateMouse.containsMouse || datePopup.visible ? Style.hoverFillFor(Color.foreground, Color.accent) : Style.normalFillFor(Color.foreground, Color.accent, Color.urgent)
+      color: dateMouse.containsMouse || datePopup.visible ? Style.hoverFillFor(Commons.Color.foreground, Commons.Color.accent) : Style.normalFillFor(Commons.Color.foreground, Commons.Color.accent, Commons.Color.urgent)
 
       Text {
         anchors.fill: parent
         anchors.leftMargin: Style.space(8)
         anchors.rightMargin: Style.space(8)
         text: Qt.formatDate(Model.dateFromKey(datePicker.value, root.today), "ddd, MMM d")
-        color: Color.foreground
+        color: Commons.Color.foreground
         elide: Text.ElideRight
         verticalAlignment: Text.AlignVCenter
         font.family: root.bar ? root.bar.fontFamily : Style.font.family
@@ -1827,8 +1828,8 @@ Panel {
       onOpened: datePicker.cursor = Model.dateFromKey(datePicker.value, root.today)
 
       background: Rectangle {
-        color: Color.popups.background
-        border.color: Color.accent
+        color: Commons.Color.popups.background
+        border.color: Commons.Color.accent
         border.width: 1
         radius: Style.cornerRadius
       }
@@ -1851,7 +1852,7 @@ Panel {
             width: Math.max(Style.space(120), parent.width - Style.space(80))
             height: parent.height
             text: Qt.formatDate(datePicker.cursor, "MMMM yyyy")
-            color: Color.foreground
+            color: Commons.Color.foreground
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
             font.family: root.bar ? root.bar.fontFamily : Style.font.family
@@ -1876,7 +1877,7 @@ Panel {
               required property int modelData
               width: (datePopup.width - Style.space(16)) / 7
               text: root.weekdayLabel(modelData).charAt(0)
-              color: Color.foreground
+              color: Commons.Color.foreground
               horizontalAlignment: Text.AlignHCenter
               font.family: root.bar ? root.bar.fontFamily : Style.font.family
               font.pixelSize: Style.font.caption
@@ -1896,17 +1897,17 @@ Panel {
                 width: (datePopup.width - Style.space(16)) / 7
                 height: Style.space(24)
                 radius: Style.cornerRadius
-                color: modelData.key === datePicker.value ? Color.accent
-                  : dayMouse.containsMouse ? Style.hoverFillFor(Color.foreground, Color.accent)
+                color: modelData.key === datePicker.value ? Commons.Color.accent
+                  : dayMouse.containsMouse ? Style.hoverFillFor(Commons.Color.foreground, Commons.Color.accent)
                   : "transparent"
                 border.width: modelData.today ? 1 : 0
-                border.color: modelData.today ? Color.accent : "transparent"
+                border.color: modelData.today ? Commons.Color.accent : "transparent"
 
                 Text {
                   anchors.centerIn: parent
                   text: modelData.day
-                  color: modelData.key === datePicker.value ? Color.popups.background
-                    : modelData.inMonth ? Color.foreground : Util.alpha(Color.foreground, 0.55)
+                  color: modelData.key === datePicker.value ? Commons.Color.popups.background
+                    : modelData.inMonth ? Commons.Color.foreground : Util.alpha(Commons.Color.foreground, 0.55)
                   font.family: root.bar ? root.bar.fontFamily : Style.font.family
                   font.pixelSize: Style.font.caption
                 }
@@ -1949,7 +1950,7 @@ Panel {
 
     Text {
       text: timePicker.label
-      color: Color.foreground
+      color: Commons.Color.foreground
       font.family: root.bar ? root.bar.fontFamily : Style.font.family
       font.pixelSize: Style.font.caption
       font.bold: true
@@ -1993,7 +1994,7 @@ Panel {
       Text {
         anchors.verticalCenter: parent.verticalCenter
         text: ":"
-        color: Color.foreground
+        color: Commons.Color.foreground
         font.family: root.bar ? root.bar.fontFamily : Style.font.family
         font.pixelSize: Style.font.body
         font.bold: true
@@ -2043,9 +2044,9 @@ Panel {
     width: Math.max(Style.space(32), spinLabel.implicitWidth + Style.space(12))
     height: Style.space(28)
     radius: Style.cornerRadius
-    color: spinMouse.containsMouse || spin.activeFocus ? Style.hoverFillFor(Color.foreground, Color.accent) : Style.normalFillFor(Color.foreground, Color.accent, Color.urgent)
+    color: spinMouse.containsMouse || spin.activeFocus ? Style.hoverFillFor(Commons.Color.foreground, Commons.Color.accent) : Style.normalFillFor(Commons.Color.foreground, Commons.Color.accent, Commons.Color.urgent)
     border.width: spin.activeFocus ? 1 : 0
-    border.color: Color.accent
+    border.color: Commons.Color.accent
     property string typeBuffer: ""
 
     function currentChoiceIndex() {
@@ -2061,7 +2062,7 @@ Panel {
       id: spinLabel
       anchors.centerIn: parent
       text: spin.display
-      color: Color.foreground
+      color: Commons.Color.foreground
       font.family: root.bar ? root.bar.fontFamily : Style.font.family
       font.pixelSize: Style.font.body
       font.bold: true
@@ -2111,8 +2112,8 @@ Panel {
       }
 
       background: Rectangle {
-        color: Color.popups.background
-        border.color: Color.accent
+        color: Commons.Color.popups.background
+        border.color: Commons.Color.accent
         border.width: 1
         radius: Style.cornerRadius
       }
@@ -2128,12 +2129,12 @@ Panel {
           width: spinList.width
           height: Style.space(24)
           color: String(modelData.label) === String(spin.display) || String(modelData.value) === String(spin.display)
-            ? Style.hoverFillFor(Color.foreground, Color.accent)
-            : (choiceMouse.containsMouse ? Style.hoverFillFor(Color.foreground, Color.accent) : "transparent")
+            ? Style.hoverFillFor(Commons.Color.foreground, Commons.Color.accent)
+            : (choiceMouse.containsMouse ? Style.hoverFillFor(Commons.Color.foreground, Commons.Color.accent) : "transparent")
           Text {
             anchors.centerIn: parent
             text: modelData.label
-            color: Color.foreground
+            color: Commons.Color.foreground
             font.family: root.bar ? root.bar.fontFamily : Style.font.family
             font.pixelSize: Style.font.bodySmall
           }
@@ -2156,8 +2157,8 @@ Panel {
     id: settingsPage
     height: settingsColumn.implicitHeight + Style.space(20)
     radius: Style.cornerRadius
-    color: Style.hoverFillFor(Color.foreground, Color.accent)
-    border.color: Color.accent
+    color: Style.hoverFillFor(Commons.Color.foreground, Commons.Color.accent)
+    border.color: Commons.Color.accent
     border.width: 1
 
     Column {
@@ -2175,7 +2176,7 @@ Panel {
         Text {
           width: Math.max(0, parent.width - closeSettingsButton.implicitWidth - parent.spacing)
           text: "CalDav Calendar settings"
-          color: Color.foreground
+          color: Commons.Color.foreground
           font.family: root.bar ? root.bar.fontFamily : Style.font.family
           font.pixelSize: Style.font.heading
           font.bold: true
@@ -2284,7 +2285,7 @@ Panel {
           Text {
             width: parent.width
             text: "Add calendar"
-            color: Color.foreground
+            color: Commons.Color.foreground
             font.family: root.bar ? root.bar.fontFamily : Style.font.family
             font.pixelSize: Style.font.bodySmall
             font.bold: true
@@ -2303,7 +2304,7 @@ Panel {
               : (root.setupKind === "webcal"
                 ? "Subscribes to a read-only iCalendar feed."
                 : "iCloud, Nextcloud, Fastmail, and other CalDAV servers.")
-            color: Color.foreground
+            color: Commons.Color.foreground
             wrapMode: Text.WordWrap
             font.family: root.bar ? root.bar.fontFamily : Style.font.family
             font.pixelSize: Style.font.caption
@@ -2345,7 +2346,7 @@ Panel {
             width: parent.width
             text: root.setupError || (calendarService ? calendarService.setupStatus : "")
             textFormat: Text.PlainText
-            color: root.setupError !== "" ? Color.urgent : Color.accent
+            color: root.setupError !== "" ? Commons.Color.urgent : Commons.Color.accent
             wrapMode: Text.WordWrap
             font.family: root.bar ? root.bar.fontFamily : Style.font.family
             font.pixelSize: Style.font.bodySmall
@@ -2366,7 +2367,7 @@ Panel {
         width: parent.width
         text: root.settingsError
         textFormat: Text.PlainText
-        color: Color.urgent
+        color: Commons.Color.urgent
         wrapMode: Text.WordWrap
         font.family: root.bar ? root.bar.fontFamily : Style.font.family
         font.pixelSize: Style.font.bodySmall
@@ -2381,7 +2382,7 @@ Panel {
           id: restoreDefaultsLabel
           anchors.verticalCenter: parent.verticalCenter
           text: "Restore defaults"
-          color: restoreDefaultsMouse.containsMouse ? Color.accent : Color.foreground
+          color: restoreDefaultsMouse.containsMouse ? Commons.Color.accent : Commons.Color.foreground
           font.family: root.bar ? root.bar.fontFamily : Style.font.family
           font.pixelSize: Style.font.bodySmall
           font.underline: true
@@ -2416,7 +2417,7 @@ Panel {
         spacing: Style.space(8)
         Text {
           text: settingsSection.title
-          color: Color.accent
+          color: Commons.Color.accent
           font.family: root.bar ? root.bar.fontFamily : Style.font.family
           font.pixelSize: Style.font.body
           font.bold: true
@@ -2424,7 +2425,7 @@ Panel {
         Text {
           visible: settingsSection.statusText !== ""
           text: settingsSection.statusText
-          color: Color.muted
+          color: Commons.Color.muted
           font.family: root.bar ? root.bar.fontFamily : Style.font.family
           font.pixelSize: Style.font.bodySmall
         }
@@ -2432,7 +2433,7 @@ Panel {
       Rectangle {
         width: parent.width
         height: 1
-        color: Color.accent
+        color: Commons.Color.accent
       }
     }
     Column {
@@ -2462,9 +2463,9 @@ Panel {
       height: Style.space(22)
       radius: width / 2
       anchors.verticalCenter: parent.verticalCenter
-      color: settingsCalendarRow.currentColor || Color.accent
+      color: settingsCalendarRow.currentColor || Commons.Color.accent
       border.width: 2
-      border.color: Color.foreground
+      border.color: Commons.Color.foreground
 
       MouseArea {
         anchors.fill: parent
@@ -2480,8 +2481,8 @@ Panel {
         dim: false
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         background: Rectangle {
-          color: Color.popups.background
-          border.color: Color.accent
+          color: Commons.Color.popups.background
+          border.color: Commons.Color.accent
           border.width: 1
           radius: Style.cornerRadius
         }
@@ -2496,7 +2497,7 @@ Panel {
               radius: width / 2
               color: modelData
               border.width: Model.colorsMatch(modelData, settingsCalendarRow.currentColor) ? 2 : 1
-              border.color: Model.colorsMatch(modelData, settingsCalendarRow.currentColor) ? Color.foreground : Util.alpha(Color.foreground, 0.35)
+              border.color: Model.colorsMatch(modelData, settingsCalendarRow.currentColor) ? Commons.Color.foreground : Util.alpha(Commons.Color.foreground, 0.35)
               MouseArea {
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor
@@ -2523,7 +2524,7 @@ Panel {
       anchors.verticalCenter: parent.verticalCenter
       text: settingsCalendarRow.sourceLabel
       textFormat: Text.PlainText
-      color: Color.foreground
+      color: Commons.Color.foreground
       font.family: root.bar ? root.bar.fontFamily : Style.font.family
       font.pixelSize: Style.font.caption
     }
@@ -2549,7 +2550,7 @@ Panel {
     id: hintLabel
     property string hint: ""
 
-    color: Color.foreground
+    color: Commons.Color.foreground
     font.family: root.bar ? root.bar.fontFamily : Style.font.family
     font.pixelSize: Style.font.bodySmall
     font.bold: true
@@ -2628,8 +2629,8 @@ Panel {
       showLabel: false
       value: settingsDropdownRow.value
       options: settingsDropdownRow.options
-      foreground: Color.foreground
-      background: Color.popups.background
+      foreground: Commons.Color.foreground
+      background: Commons.Color.popups.background
       onChanged: function(value) { settingsDropdownRow.changed(value) }
     }
   }
@@ -2663,14 +2664,14 @@ Panel {
         showLabel: false
         value: settingsRangeRow.startValue
         options: root.hourChoices(false, root.draftTimeFormat)
-        foreground: Color.foreground
-        background: Color.popups.background
+        foreground: Commons.Color.foreground
+        background: Commons.Color.popups.background
         onChanged: function(value) { settingsRangeRow.startChanged(value) }
       }
       Text {
         anchors.verticalCenter: parent.verticalCenter
         text: "–"
-        color: Color.foreground
+        color: Commons.Color.foreground
         font.family: root.bar ? root.bar.fontFamily : Style.font.family
       }
       Dropdown {
@@ -2679,8 +2680,8 @@ Panel {
         showLabel: false
         value: settingsRangeRow.endValue
         options: root.hourChoices(true, root.draftTimeFormat)
-        foreground: Color.foreground
-        background: Color.popups.background
+        foreground: Commons.Color.foreground
+        background: Commons.Color.popups.background
         onChanged: function(value) { settingsRangeRow.endChanged(value) }
       }
     }
@@ -2697,16 +2698,16 @@ Panel {
     implicitWidth: label.implicitWidth + Style.spacing.controlPaddingX * 2 + Style.space(2)
     implicitHeight: label.implicitHeight + Style.spacing.controlPaddingY * 2 + Style.space(2)
     radius: Style.cornerRadius
-    color: mouse.pressed ? Style.pressedFillFor(Color.foreground, Color.accent)
-      : mouse.containsMouse ? Style.hoverFillFor(Color.foreground, Color.accent)
-      : selected ? Style.selectedFillFor(Color.foreground, Color.accent)
+    color: mouse.pressed ? Style.pressedFillFor(Commons.Color.foreground, Commons.Color.accent)
+      : mouse.containsMouse ? Style.hoverFillFor(Commons.Color.foreground, Commons.Color.accent)
+      : selected ? Style.selectedFillFor(Commons.Color.foreground, Commons.Color.accent)
       : "transparent"
 
     Text {
       id: label
       anchors.centerIn: parent
       text: viewButton.text
-      color: viewButton.selected ? Style.selectedStateColor(Color.foreground, Color.accent) : Color.foreground
+      color: viewButton.selected ? Style.selectedStateColor(Commons.Color.foreground, Commons.Color.accent) : Commons.Color.foreground
       font.family: root.bar ? root.bar.fontFamily : Style.font.family
       font.pixelSize: Style.font.body
       font.bold: viewButton.selected
@@ -2730,14 +2731,14 @@ Panel {
 
     Row {
       spacing: Style.space(4)
-      Text { visible: root.showWeekNumbers; width: monthView.weekNumberWidth; text: "W"; color: Color.foreground; horizontalAlignment: Text.AlignHCenter; font.pixelSize: Style.font.bodySmall }
+      Text { visible: root.showWeekNumbers; width: monthView.weekNumberWidth; text: "W"; color: Commons.Color.foreground; horizontalAlignment: Text.AlignHCenter; font.pixelSize: Style.font.bodySmall }
       Repeater {
         model: Model.weekdayOrder(root.weekStart)
         Text {
           required property int modelData
           width: (monthView.width - monthView.weekNumberWidth - monthView.weekNumberGap - Style.space(24)) / 7
           text: root.weekdayLabel(modelData)
-          color: Color.foreground
+          color: Commons.Color.foreground
           horizontalAlignment: Text.AlignHCenter
           font.family: root.bar ? root.bar.fontFamily : Style.font.family
           font.pixelSize: Style.font.bodySmall
@@ -2755,7 +2756,7 @@ Panel {
           width: monthView.weekNumberWidth
           height: Style.space(80)
           text: modelData.week
-          color: Color.foreground
+          color: Commons.Color.foreground
           verticalAlignment: Text.AlignVCenter
           horizontalAlignment: Text.AlignHCenter
           font.family: root.bar ? root.bar.fontFamily : Style.font.family
@@ -2769,8 +2770,8 @@ Panel {
             width: (monthView.width - monthView.weekNumberWidth - monthView.weekNumberGap - Style.space(24)) / 7
             height: Style.space(80)
             radius: Style.cornerRadius
-            color: modelData.key === root.selectedKey ? Util.alpha(Color.accent, 0.22) : Style.normalFillFor(Color.foreground, Color.accent, Color.urgent)
-            border.color: modelData.key === root.selectedKey ? Color.accent : "transparent"
+            color: modelData.key === root.selectedKey ? Util.alpha(Commons.Color.accent, 0.22) : Style.normalFillFor(Commons.Color.foreground, Commons.Color.accent, Commons.Color.urgent)
+            border.color: modelData.key === root.selectedKey ? Commons.Color.accent : "transparent"
             border.width: modelData.key === root.selectedKey ? 1 : 0
 
             MouseArea {
@@ -2803,7 +2804,7 @@ Panel {
                   width: Style.space(18)
                   height: Style.space(18)
                   radius: width / 2
-                  color: Color.accent
+                  color: Commons.Color.accent
                 }
                 Text {
                   anchors.verticalCenter: parent.verticalCenter
@@ -2811,7 +2812,7 @@ Panel {
                   width: monthDay.modelData.today ? Style.space(18) : implicitWidth
                   horizontalAlignment: monthDay.modelData.today ? Text.AlignHCenter : Text.AlignLeft
                   text: monthDay.modelData.day
-                  color: monthDay.modelData.today ? Color.popups.background : (monthDay.modelData.inMonth ? Color.foreground : Util.alpha(Color.foreground, 0.55))
+                  color: monthDay.modelData.today ? Commons.Color.popups.background : (monthDay.modelData.inMonth ? Commons.Color.foreground : Util.alpha(Commons.Color.foreground, 0.55))
                   font.family: root.bar ? root.bar.fontFamily : Style.font.family
                   font.pixelSize: Style.font.caption
                   font.bold: monthDay.modelData.today || monthDay.modelData.key === root.selectedKey
@@ -2838,7 +2839,7 @@ Panel {
                 visible: monthDay.modelData.extra > 0
                 width: parent.width
                 text: "+" + monthDay.modelData.extra + " more"
-                color: monthDay.modelData.inMonth ? Color.foreground : Util.alpha(Color.foreground, 0.55)
+                color: monthDay.modelData.inMonth ? Commons.Color.foreground : Util.alpha(Commons.Color.foreground, 0.55)
                 font.family: root.bar ? root.bar.fontFamily : Style.font.family
                 font.pixelSize: Math.max(9, Style.font.caption - 1)
               }
@@ -2853,7 +2854,7 @@ Panel {
   component DayPanel: Rectangle {
     id: dayPanelRoot
     radius: Style.cornerRadius
-    color: Style.normalFillFor(Color.foreground, Color.accent, Color.urgent)
+    color: Style.normalFillFor(Commons.Color.foreground, Commons.Color.accent, Commons.Color.urgent)
 
     Column {
       anchors.fill: parent
@@ -2864,7 +2865,7 @@ Panel {
         id: dayPanelTitle
         width: parent.width
         text: Qt.formatDate(Model.dateFromKey(root.selectedKey, root.today), "dddd, MMM d")
-        color: Color.foreground
+        color: Commons.Color.foreground
         elide: Text.ElideRight
         font.family: root.bar ? root.bar.fontFamily : Style.font.family
         font.pixelSize: Style.font.bodySmall
@@ -2951,8 +2952,8 @@ Panel {
             anchors.fill: parent
             radius: Style.cornerRadius
             visible: parent.isSelected
-            color: Util.alpha(Color.accent, 0.22)
-            border.color: Color.accent
+            color: Util.alpha(Commons.Color.accent, 0.22)
+            border.color: Commons.Color.accent
             border.width: 1
           }
 
@@ -2962,7 +2963,7 @@ Panel {
             Text {
               anchors.horizontalCenter: parent.horizontalCenter
               text: Qt.formatDate(modelData, root.viewMode === "day" ? "dddd" : "ddd")
-              color: Color.foreground
+              color: Commons.Color.foreground
               font.family: root.bar ? root.bar.fontFamily : Style.font.family
               font.pixelSize: Style.font.caption
             }
@@ -2974,12 +2975,12 @@ Panel {
                 visible: isToday
                 anchors.fill: parent
                 radius: width / 2
-                color: Color.accent
+                color: Commons.Color.accent
               }
               Text {
                 anchors.centerIn: parent
                 text: modelData.getDate()
-                color: isToday ? Color.popups.background : Color.foreground
+                color: isToday ? Commons.Color.popups.background : Commons.Color.foreground
                 font.family: root.bar ? root.bar.fontFamily : Style.font.family
                 font.pixelSize: Style.font.bodySmall
                 font.bold: isToday || isSelected
@@ -3006,7 +3007,7 @@ Panel {
         width: timeGridView.gridLeft - timeGridView.columnGap
         height: parent.height
         text: "All day"
-        color: Color.foreground
+        color: Commons.Color.foreground
         horizontalAlignment: Text.AlignRight
         verticalAlignment: Text.AlignVCenter
         font.family: root.bar ? root.bar.fontFamily : Style.font.family
@@ -3054,7 +3055,7 @@ Panel {
           y: index * timeGridView.hourHeight - (index === timeGridView.hourCount ? implicitHeight - Style.space(2) : Style.space(6))
           width: timeGridView.gridLeft - timeGridView.columnGap
           text: Model.formatHourLabel(index + timeGridView.hourStart, root.timeFormat)
-          color: Color.muted
+          color: Commons.Color.muted
           horizontalAlignment: Text.AlignRight
           font.family: root.bar ? root.bar.fontFamily : Style.font.family
           font.pixelSize: Style.font.caption
@@ -3069,7 +3070,7 @@ Panel {
         y: timeGridView.yForHour(timeGridView.nowHour) - 1
         width: parent.width - timeGridView.gridLeft - timeGridView.gridRight
         height: 2
-        color: Color.urgent
+        color: Commons.Color.urgent
       }
 
       Rectangle {
@@ -3078,7 +3079,7 @@ Panel {
         width: Style.space(8)
         height: Style.space(8)
         radius: width / 2
-        color: Color.urgent
+        color: Commons.Color.urgent
         x: timeGridView.gridLeft + timeGridView.nowDayIndex * (timeGridView.columnWidth() + timeGridView.columnGap) - width / 2
         y: timeGridView.yForHour(timeGridView.nowHour) - height / 2
       }
@@ -3089,7 +3090,7 @@ Panel {
         x: Math.max(0, timeGridView.gridLeft - timeGridView.columnGap - implicitWidth)
         y: timeGridView.yForHour(timeGridView.nowHour) - implicitHeight / 2
         text: Model.formatClockTime(root.now.getHours(), root.now.getMinutes(), root.timeFormat)
-        color: Color.urgent
+        color: Commons.Color.urgent
         font.family: root.bar ? root.bar.fontFamily : Style.font.family
         font.pixelSize: Math.max(9, Style.font.caption - 1)
         wrapMode: Text.NoWrap
@@ -3113,7 +3114,7 @@ Panel {
             z: 0
             anchors.fill: parent
             visible: dayColumn.key === root.selectedKey
-            color: Util.alpha(Color.accent, 0.08)
+            color: Util.alpha(Commons.Color.accent, 0.08)
           }
 
           Repeater {
@@ -3123,8 +3124,8 @@ Panel {
               y: index * timeGridView.hourHeight
               width: parent.width
               height: timeGridView.hourHeight
-              color: index % 2 === 0 ? Style.normalFillFor(Color.foreground, Color.accent, Color.urgent) : Style.hoverFillFor(Color.foreground, Color.accent)
-              border.color: Util.alpha(Color.muted, 0.35)
+              color: index % 2 === 0 ? Style.normalFillFor(Commons.Color.foreground, Commons.Color.accent, Commons.Color.urgent) : Style.hoverFillFor(Commons.Color.foreground, Commons.Color.accent)
+              border.color: Util.alpha(Commons.Color.muted, 0.35)
               border.width: 1
             }
           }
@@ -3137,8 +3138,8 @@ Panel {
             width: parent.width - Style.space(6)
             height: Math.max(Style.space(12), Math.abs(root.dragEndHour - root.dragStartHour) * timeGridView.hourHeight)
             radius: Style.cornerRadius
-            color: Util.alpha(Color.accent, 0.45)
-            border.color: Color.accent
+            color: Util.alpha(Commons.Color.accent, 0.45)
+            border.color: Commons.Color.accent
             border.width: 1
           }
 
@@ -3190,12 +3191,12 @@ Panel {
     readonly property bool showTime: mode === "block" ? height >= Style.space(36) : mode === "row"
     readonly property bool wrapTitle: mode === "block" && height >= Style.space(48)
     readonly property real fillStrength: 0.72
-    readonly property color labelColor: Model.contrastingForeground(card.accentColor, card.fillStrength, Color.foreground, Color.popups.background)
+    readonly property color labelColor: Model.contrastingForeground(card.accentColor, card.fillStrength, Commons.Color.foreground, Commons.Color.popups.background)
 
     radius: mode === "chip" ? Style.space(3) : Style.cornerRadius
     opacity: (card.dimmed ? 0.65 : 1) * (card.saving ? 0.72 : 1)
     border.width: card.saving ? 1 : 0
-    border.color: Color.accent
+    border.color: Commons.Color.accent
     color: Util.alpha(card.accentColor, cardMouse.containsMouse ? Math.min(1, card.fillStrength + 0.1) : card.fillStrength)
 
     Rectangle {
@@ -3343,7 +3344,7 @@ Panel {
       visible: events.length === 0 && (!calendarService || calendarService.status !== "loading")
       width: parent.width
       text: emptyText
-      color: Color.muted
+      color: Commons.Color.muted
       horizontalAlignment: Text.AlignHCenter
       font.family: root.bar ? root.bar.fontFamily : Style.font.family
     }
@@ -3352,7 +3353,7 @@ Panel {
       visible: calendarService && calendarService.status === "loading"
       width: parent.width
       text: "Loading events..."
-      color: Color.muted
+      color: Commons.Color.muted
       horizontalAlignment: Text.AlignHCenter
       font.family: root.bar ? root.bar.fontFamily : Style.font.family
     }
