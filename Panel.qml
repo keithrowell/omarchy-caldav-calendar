@@ -960,7 +960,7 @@ Panel {
     centerOnBar: true
     focusTarget: keyCatcher
     contentWidth: panel.fittedContentWidth(Style.space(root.compactEds ? 640 : (root.showDayPanel ? 1080 : 860)))
-    contentHeight: panel.fittedContentHeight(calendarScroll.contentHeight)
+    contentHeight: panel.fittedContentHeight(calendarScroll.contentHeight + pinnedHeader.height)
 
     PanelKeyCatcher {
       id: keyCatcher
@@ -1005,9 +1005,174 @@ Panel {
         onOpenedChanged: if (opened) selectedIndex = 0
       }
 
+      // The header stays put; only the calendar under it scrolls.
+      Item {
+        id: pinnedHeader
+        anchors.top: parent.top
+        anchors.horizontalCenter: parent.horizontalCenter
+        width: calendarColumn.width
+        height: headerBar.visible ? headerBar.height + Style.space(12) : 0
+
+        Item {
+          id: headerBar
+          visible: !root.showingSettings && !root.compactEds
+          width: parent.width
+          readonly property real rowHeight: Math.max(viewControls.implicitHeight, titleColumn.implicitHeight, actionControls.implicitHeight, settingsTopButton.implicitHeight)
+          readonly property real rightWidth: actionControls.implicitWidth + calendarsMenuButton.width + dayPanelToggle.width + (windowButton.visible ? windowButton.width : 0) + settingsTopButton.width + Style.space(28)
+          // A narrow window puts the title on its own row above the controls.
+          readonly property bool stacked: width < viewControls.implicitWidth + titleNav.width + rightWidth + Style.space(24)
+          readonly property real controlsOffset: stacked ? (rowHeight + Style.space(8)) / 2 : 0
+          height: stacked ? rowHeight * 2 + Style.space(8) : rowHeight
+
+          Row {
+            id: viewControls
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.verticalCenterOffset: headerBar.controlsOffset
+            spacing: Style.space(4)
+            ViewButton { text: "Month"; selected: root.viewMode === "month"; onClicked: root.setView("month"); onDoubleClicked: { root.setView("month"); root.goToToday() } }
+            ViewButton { text: "Week"; selected: root.viewMode === "week"; onClicked: root.setView("week"); onDoubleClicked: { root.setView("week"); root.goToToday() } }
+            ViewButton { text: "Work week"; selected: root.viewMode === "work-week"; onClicked: root.setView("work-week"); onDoubleClicked: { root.setView("work-week"); root.goToToday() } }
+            ViewButton { text: "Day"; selected: root.viewMode === "day"; onClicked: root.setView("day"); onDoubleClicked: { root.setView("day"); root.goToToday() } }
+          }
+
+          Item {
+            id: titleNav
+            width: Style.space(260)
+            height: Math.max(previousButton.implicitHeight, titleColumn.implicitHeight, nextButton.implicitHeight)
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.verticalCenterOffset: -headerBar.controlsOffset
+
+            PanelActionButton {
+              id: previousButton
+              anchors.left: parent.left
+              anchors.verticalCenter: parent.verticalCenter
+              iconText: "‹"
+              tooltipText: "Previous"
+              onClicked: root.movePeriod(-1)
+            }
+            Column {
+              id: titleColumn
+              anchors.left: previousButton.right
+              anchors.right: nextButton.left
+              anchors.leftMargin: Style.space(4)
+              anchors.rightMargin: Style.space(4)
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: Style.space(2)
+
+              Text {
+                width: parent.width
+                text: root.headline
+                color: Commons.Color.foreground
+                horizontalAlignment: Text.AlignHCenter
+                elide: Text.ElideRight
+                font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                font.pixelSize: Style.font.heading
+                font.bold: true
+
+                MouseArea {
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  onDoubleClicked: root.goToToday()
+                }
+              }
+              Text {
+                width: parent.width
+                text: calendarService ? ((calendarService.syncing ? "Syncing" : (calendarService.lastSyncText === "Cached" || calendarService.lastSyncText === "Never synced" ? calendarService.lastSyncText : "Synced " + calendarService.lastSyncText)) + " · " + calendarService.calendars.length + " calendars") : "Calendar service not loaded"
+                color: Commons.Color.muted
+                horizontalAlignment: Text.AlignHCenter
+                elide: Text.ElideRight
+                font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                font.pixelSize: Style.font.bodySmall
+              }
+            }
+            PanelActionButton {
+              id: nextButton
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              iconText: "›"
+              tooltipText: "Next"
+              onClicked: root.movePeriod(1)
+            }
+          }
+
+          Row {
+            id: actionControls
+            anchors.right: calendarsMenuButton.left
+            anchors.rightMargin: Style.space(8)
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.verticalCenterOffset: headerBar.controlsOffset
+            spacing: Style.space(6)
+            Button { id: syncButton; text: "Sync"; tooltipText: "Sync now"; onClicked: root.refresh(true) }
+            Button { text: "Add event"; bordered: true; enabled: calendarService && root.selectedWritableCalendarId() !== ""; selected: root.creatingEvent && !root.editingEvent; onClicked: root.creatingEvent && !root.editingEvent ? root.cancelCreatingEvent() : root.startCreatingEvent() }
+          }
+
+          PanelActionButton {
+            id: calendarsMenuButton
+            visible: !root.showingSettings
+            anchors.right: dayPanelToggle.left
+            anchors.rightMargin: Style.space(4)
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.verticalCenterOffset: headerBar.controlsOffset
+            iconText: "󰃭"
+            tooltipText: root.hiddenCalendarCount > 0 ? "Calendars (" + root.hiddenCalendarCount + " hidden)" : "Show or hide calendars"
+            bordered: root.hiddenCalendarCount > 0 || calendarsMenu.opened
+            onClicked: calendarsMenu.opened ? calendarsMenu.close() : calendarsMenu.open()
+
+            CalendarsMenu {
+              id: calendarsMenu
+              objectName: "calendarsMenu"
+              x: parent.width - width
+              y: parent.height + Style.space(6)
+            }
+          }
+
+          PanelActionButton {
+            id: dayPanelToggle
+            visible: !root.showingSettings
+            anchors.right: windowButton.visible ? windowButton.left : settingsTopButton.left
+            anchors.rightMargin: Style.space(4)
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.verticalCenterOffset: headerBar.controlsOffset
+            iconText: "\uebf4"
+            tooltipText: root.showDayPanel ? "Hide day panel" : "Show day panel"
+            bordered: root.showDayPanel
+            onClicked: root.toggleDayPanel()
+          }
+
+          PanelActionButton {
+            id: windowButton
+            visible: !root.windowMode && !root.showingSettings && !!root.hostWidget
+            anchors.right: settingsTopButton.left
+            anchors.rightMargin: Style.space(4)
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.verticalCenterOffset: headerBar.controlsOffset
+            iconText: "󰖯"
+            tooltipText: "Open in a window"
+            onClicked: root.openInWindow()
+          }
+
+          PanelActionButton {
+            id: settingsTopButton
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.verticalCenterOffset: headerBar.controlsOffset
+            iconText: "󰒓"
+            tooltipText: root.showingSettings ? "Close settings" : "CalDav Calendar settings"
+            bordered: root.showingSettings
+            onClicked: root.toggleSettings()
+          }
+        }
+      }
+
       Flickable {
         id: calendarScroll
-        anchors.fill: parent
+        anchors.top: pinnedHeader.bottom
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
         contentWidth: width
         contentHeight: contentWrap.height
         clip: true
@@ -1024,158 +1189,6 @@ Panel {
             anchors.horizontalCenter: parent.horizontalCenter
             spacing: Style.space(12)
 
-            Item {
-              id: headerBar
-              visible: !root.showingSettings && !root.compactEds
-              width: parent.width
-              readonly property real rowHeight: Math.max(viewControls.implicitHeight, titleColumn.implicitHeight, actionControls.implicitHeight, settingsTopButton.implicitHeight)
-              readonly property real rightWidth: actionControls.implicitWidth + calendarsMenuButton.width + dayPanelToggle.width + (windowButton.visible ? windowButton.width : 0) + settingsTopButton.width + Style.space(28)
-              // A narrow window puts the title on its own row above the controls.
-              readonly property bool stacked: width < viewControls.implicitWidth + titleNav.width + rightWidth + Style.space(24)
-              readonly property real controlsOffset: stacked ? (rowHeight + Style.space(8)) / 2 : 0
-              height: stacked ? rowHeight * 2 + Style.space(8) : rowHeight
-
-              Row {
-                id: viewControls
-                anchors.left: parent.left
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.verticalCenterOffset: headerBar.controlsOffset
-                spacing: Style.space(4)
-                ViewButton { text: "Month"; selected: root.viewMode === "month"; onClicked: root.setView("month"); onDoubleClicked: { root.setView("month"); root.goToToday() } }
-                ViewButton { text: "Week"; selected: root.viewMode === "week"; onClicked: root.setView("week"); onDoubleClicked: { root.setView("week"); root.goToToday() } }
-                ViewButton { text: "Work week"; selected: root.viewMode === "work-week"; onClicked: root.setView("work-week"); onDoubleClicked: { root.setView("work-week"); root.goToToday() } }
-                ViewButton { text: "Day"; selected: root.viewMode === "day"; onClicked: root.setView("day"); onDoubleClicked: { root.setView("day"); root.goToToday() } }
-              }
-
-              Item {
-                id: titleNav
-                width: Style.space(260)
-                height: Math.max(previousButton.implicitHeight, titleColumn.implicitHeight, nextButton.implicitHeight)
-                anchors.horizontalCenter: parent.horizontalCenter
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.verticalCenterOffset: -headerBar.controlsOffset
-
-                PanelActionButton {
-                  id: previousButton
-                  anchors.left: parent.left
-                  anchors.verticalCenter: parent.verticalCenter
-                  iconText: "‹"
-                  tooltipText: "Previous"
-                  onClicked: root.movePeriod(-1)
-                }
-                Column {
-                  id: titleColumn
-                  anchors.left: previousButton.right
-                  anchors.right: nextButton.left
-                  anchors.leftMargin: Style.space(4)
-                  anchors.rightMargin: Style.space(4)
-                  anchors.verticalCenter: parent.verticalCenter
-                  spacing: Style.space(2)
-
-                  Text {
-                    width: parent.width
-                    text: root.headline
-                    color: Commons.Color.foreground
-                    horizontalAlignment: Text.AlignHCenter
-                    elide: Text.ElideRight
-                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                    font.pixelSize: Style.font.heading
-                    font.bold: true
-
-                    MouseArea {
-                      anchors.fill: parent
-                      hoverEnabled: true
-                      cursorShape: Qt.PointingHandCursor
-                      onDoubleClicked: root.goToToday()
-                    }
-                  }
-                  Text {
-                    width: parent.width
-                    text: calendarService ? ((calendarService.syncing ? "Syncing" : (calendarService.lastSyncText === "Cached" || calendarService.lastSyncText === "Never synced" ? calendarService.lastSyncText : "Synced " + calendarService.lastSyncText)) + " · " + calendarService.calendars.length + " calendars") : "Calendar service not loaded"
-                    color: Commons.Color.muted
-                    horizontalAlignment: Text.AlignHCenter
-                    elide: Text.ElideRight
-                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                    font.pixelSize: Style.font.bodySmall
-                  }
-                }
-                PanelActionButton {
-                  id: nextButton
-                  anchors.right: parent.right
-                  anchors.verticalCenter: parent.verticalCenter
-                  iconText: "›"
-                  tooltipText: "Next"
-                  onClicked: root.movePeriod(1)
-                }
-              }
-
-              Row {
-                id: actionControls
-                anchors.right: calendarsMenuButton.left
-                anchors.rightMargin: Style.space(8)
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.verticalCenterOffset: headerBar.controlsOffset
-                spacing: Style.space(6)
-                Button { id: syncButton; text: "Sync"; tooltipText: "Sync now"; onClicked: root.refresh(true) }
-                Button { text: "Add event"; bordered: true; enabled: calendarService && root.selectedWritableCalendarId() !== ""; selected: root.creatingEvent && !root.editingEvent; onClicked: root.creatingEvent && !root.editingEvent ? root.cancelCreatingEvent() : root.startCreatingEvent() }
-              }
-
-              PanelActionButton {
-                id: calendarsMenuButton
-                visible: !root.showingSettings
-                anchors.right: dayPanelToggle.left
-                anchors.rightMargin: Style.space(4)
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.verticalCenterOffset: headerBar.controlsOffset
-                iconText: "󰃭"
-                tooltipText: root.hiddenCalendarCount > 0 ? "Calendars (" + root.hiddenCalendarCount + " hidden)" : "Show or hide calendars"
-                bordered: root.hiddenCalendarCount > 0 || calendarsMenu.opened
-                onClicked: calendarsMenu.opened ? calendarsMenu.close() : calendarsMenu.open()
-
-                CalendarsMenu {
-                  id: calendarsMenu
-                  objectName: "calendarsMenu"
-                  x: parent.width - width
-                  y: parent.height + Style.space(6)
-                }
-              }
-
-              PanelActionButton {
-                id: dayPanelToggle
-                visible: !root.showingSettings
-                anchors.right: windowButton.visible ? windowButton.left : settingsTopButton.left
-                anchors.rightMargin: Style.space(4)
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.verticalCenterOffset: headerBar.controlsOffset
-                iconText: "\uebf4"
-                tooltipText: root.showDayPanel ? "Hide day panel" : "Show day panel"
-                bordered: root.showDayPanel
-                onClicked: root.toggleDayPanel()
-              }
-
-              PanelActionButton {
-                id: windowButton
-                visible: !root.windowMode && !root.showingSettings && !!root.hostWidget
-                anchors.right: settingsTopButton.left
-                anchors.rightMargin: Style.space(4)
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.verticalCenterOffset: headerBar.controlsOffset
-                iconText: "󰖯"
-                tooltipText: "Open in a window"
-                onClicked: root.openInWindow()
-              }
-
-              PanelActionButton {
-                id: settingsTopButton
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.verticalCenterOffset: headerBar.controlsOffset
-                iconText: "󰒓"
-                tooltipText: root.showingSettings ? "Close settings" : "CalDav Calendar settings"
-                bordered: root.showingSettings
-                onClicked: root.toggleSettings()
-              }
-            }
 
             SettingsPage { visible: root.showingSettings; width: parent.width }
 
