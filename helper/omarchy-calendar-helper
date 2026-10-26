@@ -2736,7 +2736,10 @@ def eds_snapshot(start: datetime, end: datetime, include_events: bool = True, if
         response_overflow = len(json.dumps(public_payload, separators=(",", ":")).encode("utf-8")) > MAX_STDOUT_BYTES
         failure_code = "snapshot-incomplete" if snapshot_incomplete else "snapshot-too-large"
         try:
-            persisted = None if snapshot_incomplete or item_overflow or response_overflow else write_cache(payload)
+            # Local patch (Keith, 27 Oct 2026): a calendar that fails already falls back to its
+            # cached events and previous sync state above, so keep the calendars that did sync
+            # instead of discarding the whole snapshot. 38 iCloud calendars never all succeed at once.
+            persisted = None if item_overflow or response_overflow else write_cache(payload)
         except OSError as error:
             sync_log("cache-write-failed", error=str(error)[:200])
             failure_code = "cache-write-failed"
