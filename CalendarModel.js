@@ -389,7 +389,7 @@ function timelineHours(events, dayKey, defaultStart, defaultEnd) {
   var start = defaultStart
   var end = defaultEnd
   eventsForDay(events, dayKey).forEach(function(event) {
-    if (event.allDay === true) return
+    if (event.allDay === true || coversWholeDay(event, dayKey)) return
     start = Math.min(start, Math.floor(eventHour(event, dayKey)))
     end = Math.max(end, Math.ceil(eventEndHour(event, dayKey)))
   })

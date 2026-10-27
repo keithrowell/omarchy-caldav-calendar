@@ -4151,7 +4151,7 @@ Panel {
       Text {
         width: Style.space(56)
         anchors.verticalCenter: parent.verticalCenter
-        text: Model.eventListTime(card.event, root.selectedKey, root.timeFormat)
+        text: card.event && card.event.wholeDay ? "All day" : Model.eventListTime(card.event, root.selectedKey, root.timeFormat)
         textFormat: Text.PlainText
         color: card.allDay ? Commons.Color.muted : card.labelColor
         elide: Text.ElideRight

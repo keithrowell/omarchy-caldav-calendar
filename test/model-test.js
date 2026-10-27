@@ -367,4 +367,6 @@ assert.deepEqual(model.allDayEventsForDay(stayDays, '2026-08-20').map(event => [
 assert.deepEqual(model.layoutTimedEvents(stayDays, '2026-08-20', 0, 24).map(segment => segment.event.id), ['meet'])
 assert.deepEqual(model.layoutTimedEvents(stayDays, '2026-08-21', 0, 24).map(segment => segment.event.id), ['stay'])
 
+assert.deepEqual(model.timelineHours(stayDays, '2026-08-20', 8, 18), { start: 8, end: 18 })
+
 console.log('ok - calendar model')
