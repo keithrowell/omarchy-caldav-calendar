@@ -91,6 +91,13 @@ Panel {
   readonly property int workWeekEndHour: weekEndHour
   readonly property int dayStartHour: customDayStartHour
   readonly property int dayEndHour: customDayEndHour
+  // Every time view (day, 3 days, week, work week, day column) covers the
+  // whole day, opens at screenStartHour and sizes its hours so that
+  // screenStartHour to screenEndHour fill the view; the rest scrolls.
+  readonly property int screenStartHour: clampedHour(setting("screenStartHour", 7), 7)
+  readonly property int screenEndHour: clampedEndHour(setting("screenEndHour", 19), 19, screenStartHour)
+  property int draftScreenStartHour: 7
+  property int draftScreenEndHour: 19
   readonly property int fixedEventDurationMinutes: 60
   readonly property string defaultCalendarId: String(setting("defaultCalendarId", ""))
   readonly property int reminderMinutes: Model.normalizedReminderMinutes(setting("reminderMinutes", 10))
@@ -395,12 +402,8 @@ Panel {
   }
 
   function saveSettings() {
-    if (draftCustomWeekEndHour <= draftCustomWeekStartHour) {
-      settingsError = "Week hours must end after they start."
-      return
-    }
-    if (draftCustomDayEndHour <= draftCustomDayStartHour) {
-      settingsError = "Day hours must end after they start."
+    if (draftScreenEndHour <= draftScreenStartHour) {
+      settingsError = "Hours on screen must end after they start."
       return
     }
     persistSettings({
@@ -412,6 +415,8 @@ Panel {
       customWeekEndHour: draftCustomWeekEndHour,
       customDayStartHour: draftCustomDayStartHour,
       customDayEndHour: draftCustomDayEndHour,
+      screenStartHour: draftScreenStartHour,
+      screenEndHour: draftScreenEndHour,
       defaultCalendarId: draftDefaultCalendarId,
       reminderMinutes: parseInt(draftReminderMinutes, 10),
       calendarNames: draftCalendarNames,
@@ -436,6 +441,8 @@ Panel {
     draftCustomWeekEndHour = customWeekEndHour
     draftCustomDayStartHour = customDayStartHour
     draftCustomDayEndHour = customDayEndHour
+    draftScreenStartHour = screenStartHour
+    draftScreenEndHour = screenEndHour
     draftDefaultCalendarId = defaultCalendarId
     draftReminderMinutes = String(reminderMinutes)
     draftCalendarNames = root.loadedCalendarNames()
@@ -452,6 +459,8 @@ Panel {
     draftCustomWeekEndHour = 18
     draftCustomDayStartHour = 0
     draftCustomDayEndHour = 24
+    draftScreenStartHour = 7
+    draftScreenEndHour = 19
     draftDefaultCalendarId = ""
     draftReminderMinutes = "10"
     draftCalendarNames = ({})
@@ -1853,7 +1862,7 @@ Panel {
                   id: timeGridRoot
                   visible: root.viewMode !== "month"
                   width: parent.width
-                  viewportHeight: root.windowMode && !root.creatingEvent ? calendarScroll.height : 0
+                  viewportHeight: root.windowMode && !root.creatingEvent ? calendarScroll.height : Style.space(640)
                 }
               }
               DayPanel {
@@ -2466,22 +2475,14 @@ Panel {
       }
 
       SettingsSection {
-        title: "Visible hours"
+        title: "Hours on screen"
         SettingsRangeRow {
-          label: "Week"
-          hint: "Hour range shown in week and work week views."
-          startValue: String(root.draftCustomWeekStartHour)
-          endValue: String(root.draftCustomWeekEndHour)
-          onStartChanged: function(value) { root.draftCustomWeekStartHour = parseInt(value, 10) }
-          onEndChanged: function(value) { root.draftCustomWeekEndHour = parseInt(value, 10) }
-        }
-        SettingsRangeRow {
-          label: "Day"
-          hint: "Hour range shown in day view."
-          startValue: String(root.draftCustomDayStartHour)
-          endValue: String(root.draftCustomDayEndHour)
-          onStartChanged: function(value) { root.draftCustomDayStartHour = parseInt(value, 10) }
-          onEndChanged: function(value) { root.draftCustomDayEndHour = parseInt(value, 10) }
+          label: "Day and week"
+          hint: "These hours fill the screen when a day or week opens. Scroll for the rest of the day."
+          startValue: String(root.draftScreenStartHour)
+          endValue: String(root.draftScreenEndHour)
+          onStartChanged: function(value) { root.draftScreenStartHour = parseInt(value, 10) }
+          onEndChanged: function(value) { root.draftScreenEndHour = parseInt(value, 10) }
         }
       }
 
@@ -3580,7 +3581,7 @@ Panel {
     color: Style.normalFillFor(Commons.Color.foreground, Commons.Color.accent, Commons.Color.urgent)
 
     readonly property var allDayEvents: Model.allDayEventsForDay(root.eventGroups, root.selectedKey)
-    readonly property var hours: Model.timelineHours(root.eventGroups, root.selectedKey, 8, 18)
+    readonly property var hours: Model.timelineHours(root.eventGroups, root.selectedKey, root.screenStartHour, root.screenEndHour)
     readonly property var segments: Model.layoutTimedEvents(root.eventGroups, root.selectedKey, hours.start, hours.end)
 
     Column {
@@ -3707,15 +3708,12 @@ Panel {
   component TimeGridView: Column {
     id: timeGridView
     spacing: Style.space(6)
-    readonly property int hourStart: root.viewMode === "day" ? root.dayStartHour : (root.viewMode === "work-week" ? root.workWeekStartHour : root.weekStartHour)
-    readonly property int hourEnd: root.viewMode === "day" ? root.dayEndHour : (root.viewMode === "work-week" ? root.workWeekEndHour : root.weekEndHour)
+    readonly property int hourStart: 0
+    readonly property int hourEnd: 24
     readonly property int hourCount: hourEnd - hourStart
-    readonly property int baseHourHeight: root.viewMode === "day" ? Style.space(50) : Style.space(42)
-    // In the window the hours stretch to fill the height below the headings,
-    // and only scroll when even the base size doesn't fit.
-    readonly property int hourHeight: viewportHeight > 0
-      ? Math.max(baseHourHeight, Math.floor((viewportHeight - headerRowsHeight) / Math.max(1, hourCount)))
-      : baseHourHeight
+    // The same hour height in every time view: the screen hours fill the
+    // space under the headings, never smaller than a readable minimum.
+    readonly property int hourHeight: Math.max(Style.space(32), Math.floor((viewportHeight - headerRowsHeight) / Math.max(1, root.screenEndHour - root.screenStartHour)))
     readonly property int gridLeft: Style.space(48)
     readonly property int gridRight: Style.space(8)
     // Height the view may use in the window (0 in the popup), and the height
@@ -3724,12 +3722,17 @@ Panel {
     readonly property real headerRowsHeight: Style.space(42) + (allDayCount > 0 ? allDayRowHeight + spacing : 0) + spacing
 
     function scrollToWorkingHours() {
-      if (hoursScroll.height >= hoursScroll.contentHeight) return
-      var target = nowDayIndex >= 0 ? Math.max(hourStart, nowHour - 1) : Math.max(hourStart, 8)
-      hoursScroll.contentY = Math.max(0, Math.min(hoursScroll.contentHeight - hoursScroll.height, yForHour(Math.floor(target))))
+      hoursScroll.contentY = Math.max(0, Math.min(hoursScroll.contentHeight - hoursScroll.height, yForHour(root.screenStartHour)))
     }
     onVisibleChanged: if (visible) Qt.callLater(scrollToWorkingHours)
     onViewportHeightChanged: Qt.callLater(scrollToWorkingHours)
+    onHourHeightChanged: Qt.callLater(scrollToWorkingHours)
+    Connections {
+      target: root
+      function onViewModeChanged() { Qt.callLater(timeGridView.scrollToWorkingHours) }
+      function onDaySpanChanged() { Qt.callLater(timeGridView.scrollToWorkingHours) }
+      function onActiveChanged() { if (root.active) Qt.callLater(timeGridView.scrollToWorkingHours) }
+    }
     readonly property int columnGap: Style.space(4)
 
     function columnWidth() {
@@ -3880,9 +3883,7 @@ Panel {
     Flickable {
       id: hoursScroll
       width: parent.width
-      height: timeGridView.viewportHeight > 0
-        ? Math.min(hoursGrid.height, Math.max(Style.space(160), timeGridView.viewportHeight - timeGridView.headerRowsHeight))
-        : hoursGrid.height
+      height: Math.min(hoursGrid.height, Math.max(Style.space(160), timeGridView.viewportHeight - timeGridView.headerRowsHeight))
       contentWidth: width
       contentHeight: hoursGrid.height
       clip: true
