@@ -245,9 +245,15 @@ function startOfWeek(date, weekStart) {
   return copy
 }
 
-function daysForView(selectedKey, viewMode, weekStart) {
+// daySpan 3 shows the selected day with a day either side in day view.
+function daysForView(selectedKey, viewMode, weekStart, daySpan) {
   var selected = dateFromKey(selectedKey)
-  if (viewMode === 'day') return [selected]
+  if (viewMode === 'day') {
+    if (Number(daySpan) !== 3) return [selected]
+    return [-1, 0, 1].map(function(offset) {
+      return new Date(selected.getFullYear(), selected.getMonth(), selected.getDate() + offset)
+    })
+  }
 
   var start = startOfWeek(selected, weekStart)
   var count = viewMode === 'work-week' ? 5 : 7
@@ -263,8 +269,8 @@ function daysForView(selectedKey, viewMode, weekStart) {
   return days
 }
 
-function viewRange(selectedKey, viewMode, weekStart) {
-  var days = daysForView(selectedKey, viewMode, weekStart)
+function viewRange(selectedKey, viewMode, weekStart, daySpan) {
+  var days = daysForView(selectedKey, viewMode, weekStart, daySpan)
   var first = days[0]
   var last = days[days.length - 1]
   var start = new Date(first.getFullYear(), first.getMonth(), first.getDate(), 0, 0, 0, 0)
@@ -272,9 +278,9 @@ function viewRange(selectedKey, viewMode, weekStart) {
   return { start: start.toISOString(), end: end.toISOString() }
 }
 
-function viewTitle(selectedKey, viewMode, weekStart) {
-  var days = daysForView(selectedKey, viewMode, weekStart)
-  if (viewMode === 'day') return WEEKDAY_NAMES[days[0].getDay()] + ', ' + MONTH_NAMES[days[0].getMonth()] + ' ' + days[0].getDate()
+function viewTitle(selectedKey, viewMode, weekStart, daySpan) {
+  var days = daysForView(selectedKey, viewMode, weekStart, daySpan)
+  if (viewMode === 'day' && days.length === 1) return WEEKDAY_NAMES[days[0].getDay()] + ', ' + MONTH_NAMES[days[0].getMonth()] + ' ' + days[0].getDate()
   var first = days[0]
   var last = days[days.length - 1]
   var sameMonth = first.getMonth() === last.getMonth() && first.getFullYear() === last.getFullYear()

@@ -106,11 +106,13 @@ Panel {
   property int monthPreviewLimit: 2
   readonly property var weeks: Model.monthGrid(viewYear, viewMonth, weekStart, todayKey, eventGroups, monthPreviewLimit)
   readonly property var selectedEvents: Model.eventsForDay(eventGroups, selectedKey)
-  readonly property var viewDays: Model.daysForView(selectedKey, viewMode, weekStart)
+  // Day view shows one day, or three (the selected day and one either side).
+  readonly property int daySpan: Number(setting("daySpan", 1)) === 3 ? 3 : 1
+  readonly property var viewDays: Model.daysForView(selectedKey, viewMode, weekStart, daySpan)
   readonly property string provider: setting("provider", "evolution-data-server")
   readonly property string headline: viewMode === "month"
     ? Qt.formatDate(new Date(viewYear, viewMonth, 1), "MMMM yyyy")
-    : Model.viewTitle(selectedKey, viewMode, weekStart)
+    : Model.viewTitle(selectedKey, viewMode, weekStart, daySpan)
 
   function open() {
     if (!appliedDefaultView) {
@@ -205,7 +207,7 @@ Panel {
   function activeRange() {
     return viewMode === "month"
       ? Model.monthRange(viewYear, viewMonth, weekStart)
-      : Model.viewRange(selectedKey, viewMode, weekStart)
+      : Model.viewRange(selectedKey, viewMode, weekStart, daySpan)
   }
 
   function refresh(forceSync) {
@@ -247,6 +249,11 @@ Panel {
     showingSetup = false
     showingSettings = false
     refresh()
+  }
+
+  function setDaySpan(span) {
+    persistSettings({ daySpan: span === 3 ? 3 : 1 })
+    Qt.callLater(refresh)
   }
 
   function dayKey(date) { return Model.keyForDate(date) }
@@ -1041,6 +1048,13 @@ Panel {
             ViewButton { text: "Week"; selected: root.viewMode === "week"; onClicked: root.setView("week"); onDoubleClicked: { root.setView("week"); root.goToToday() } }
             ViewButton { text: "Work week"; selected: root.viewMode === "work-week"; onClicked: root.setView("work-week"); onDoubleClicked: { root.setView("work-week"); root.goToToday() } }
             ViewButton { text: "Day"; selected: root.viewMode === "day"; onClicked: root.setView("day"); onDoubleClicked: { root.setView("day"); root.goToToday() } }
+            SegmentedChoice {
+              visible: root.viewMode === "day"
+              anchors.verticalCenter: parent.verticalCenter
+              value: root.daySpan
+              options: [{ value: 1, label: "1 day" }, { value: 3, label: "3 days" }]
+              onChosen: function(value) { root.setDaySpan(value) }
+            }
           }
 
           Item {
@@ -3317,6 +3331,65 @@ Panel {
         foreground: Commons.Color.foreground
         background: Commons.Color.popups.background
         onChanged: function(value) { settingsRangeRow.endChanged(value) }
+      }
+    }
+  }
+
+  // Joined buttons for a small set of choices, one selected. One outline
+  // round the group, a divider between buttons, the choice filled.
+  component SegmentedChoice: Rectangle {
+    id: segmented
+    property var value
+    property var options: []
+    signal chosen(var value)
+    implicitWidth: segmentRow.implicitWidth
+    implicitHeight: segmentRow.implicitHeight
+    width: implicitWidth
+    height: implicitHeight
+    radius: Style.cornerRadius
+    color: "transparent"
+    border.width: 1
+    border.color: Util.alpha(Commons.Color.foreground, 0.3)
+    clip: true
+
+    Row {
+      id: segmentRow
+      Repeater {
+        model: segmented.options
+        Rectangle {
+          id: segment
+          required property var modelData
+          required property int index
+          readonly property bool selected: segmented.value === modelData.value
+          width: segmentLabel.implicitWidth + Style.spacing.controlPaddingX * 2
+          height: segmentLabel.implicitHeight + Style.spacing.controlPaddingY * 2
+          color: segment.selected ? Style.selectedFillFor(Commons.Color.foreground, Commons.Color.accent)
+            : segmentMouse.containsMouse ? Style.hoverFillFor(Commons.Color.foreground, Commons.Color.accent)
+            : "transparent"
+
+          Rectangle {
+            visible: segment.index > 0
+            width: 1
+            height: parent.height
+            color: Util.alpha(Commons.Color.foreground, 0.3)
+          }
+          Text {
+            id: segmentLabel
+            anchors.centerIn: parent
+            text: segment.modelData.label
+            color: segment.selected ? Style.selectedStateColor(Commons.Color.foreground, Commons.Color.accent) : Commons.Color.foreground
+            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            font.pixelSize: Style.font.bodySmall
+            font.bold: segment.selected
+          }
+          MouseArea {
+            id: segmentMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: segmented.chosen(segment.modelData.value)
+          }
+        }
       }
     }
   }

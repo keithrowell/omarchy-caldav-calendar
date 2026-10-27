@@ -354,6 +354,11 @@ const tallGrid = model.monthGrid(2026, 7, 1, '', model.eventsByDay([
 assert.equal(tallGrid.previews.length, 3)
 assert.equal(tallGrid.extra, 0)
 
+assert.deepEqual(model.daysForView('2026-08-01', 'day', 1, 3).map(model.keyForDate), ['2026-07-31', '2026-08-01', '2026-08-02'])
+assert.equal(model.daysForView('2026-08-20', 'day', 1, 1).length, 1)
+assert.equal(model.viewTitle('2026-08-20', 'day', 1, 3), 'August 19-21, 2026')
+assert.equal(model.viewTitle('2026-08-20', 'day', 1, 1), 'Thursday, August 20')
+
 const stay = { id: 'stay', start: localIso('2026-08-19', '15:00'), end: localIso('2026-08-21', '09:00') }
 const stayDays = model.eventsByDay([stay, { id: 'meet', start: localIso('2026-08-20', '10:00'), end: localIso('2026-08-20', '11:00') }])
 assert.equal(model.coversWholeDay(model.normalizeEvents([stay])[0], '2026-08-20'), true)
