@@ -103,7 +103,8 @@ Panel {
   readonly property var calendarColorPalette: Model.DEFAULT_CALENDAR_COLORS.concat(Model.EXTRA_CALENDAR_COLORS)
   readonly property var themeColorPalette: [String(Commons.Color.accent), String(Commons.Color.foreground), String(Commons.Color.urgent), String(Commons.Color.muted)]
   readonly property var eventGroups: Model.visibleEventsByDay(calendarService ? calendarService.eventsByDay : ({}), hiddenCalendars)
-  readonly property var weeks: Model.monthGrid(viewYear, viewMonth, weekStart, todayKey, eventGroups)
+  property int monthPreviewLimit: 2
+  readonly property var weeks: Model.monthGrid(viewYear, viewMonth, weekStart, todayKey, eventGroups, monthPreviewLimit)
   readonly property var selectedEvents: Model.eventsForDay(eventGroups, selectedKey)
   readonly property var viewDays: Model.daysForView(selectedKey, viewMode, weekStart)
   readonly property string provider: setting("provider", "evolution-data-server")
@@ -1825,6 +1826,7 @@ Panel {
                   id: monthViewRoot
                   visible: root.viewMode === "month"
                   width: parent.width
+                  availableHeight: root.windowMode && !root.creatingEvent ? calendarScroll.height : 0
                 }
                 TimeGridView {
                   id: timeGridRoot
@@ -3351,10 +3353,21 @@ Panel {
   component MonthView: Column {
     id: monthView
     spacing: Style.space(4)
+    // Height the month may fill in the window (0 in the popup, which keeps
+    // fixed rows). Taller rows show more events before "+N more".
+    property real availableHeight: 0
+    readonly property int rowCount: Math.max(1, root.weeks.length)
+    readonly property real cellHeight: availableHeight > 0
+      ? Math.max(Style.space(80), Math.floor((availableHeight - weekdayHeader.height - spacing * rowCount) / rowCount))
+      : Style.space(80)
+    readonly property int previewLimit: Math.max(2, Math.floor((cellHeight - Style.space(8) - Style.space(18) - Style.space(16)) / Style.space(16)))
+    onPreviewLimitChanged: root.monthPreviewLimit = previewLimit
+    Component.onCompleted: root.monthPreviewLimit = previewLimit
     readonly property int weekNumberWidth: root.showWeekNumbers ? Style.space(32) : 0
     readonly property int weekNumberGap: root.showWeekNumbers ? Style.space(4) : 0
 
     Row {
+      id: weekdayHeader
       spacing: Style.space(4)
       Text { visible: root.showWeekNumbers; width: monthView.weekNumberWidth; text: "W"; color: Commons.Color.foreground; horizontalAlignment: Text.AlignHCenter; font.pixelSize: Style.font.bodySmall }
       Repeater {
@@ -3379,7 +3392,7 @@ Panel {
         Text {
           visible: root.showWeekNumbers
           width: monthView.weekNumberWidth
-          height: Style.space(80)
+          height: monthView.cellHeight
           text: modelData.week
           color: Commons.Color.foreground
           verticalAlignment: Text.AlignVCenter
@@ -3393,7 +3406,7 @@ Panel {
             id: monthDay
             required property var modelData
             width: (monthView.width - monthView.weekNumberWidth - monthView.weekNumberGap - Style.space(24)) / 7
-            height: Style.space(80)
+            height: monthView.cellHeight
             radius: Style.cornerRadius
             color: modelData.key === root.selectedKey ? Util.alpha(Commons.Color.accent, 0.22) : Style.normalFillFor(Commons.Color.foreground, Commons.Color.accent, Commons.Color.urgent)
             border.color: modelData.key === root.selectedKey ? Commons.Color.accent : "transparent"
@@ -3476,10 +3489,16 @@ Panel {
 
   }
 
+  // The selected day: all-day entries on top, then the day's hours drawn to
+  // scale, so the gaps between meetings are as visible as the meetings.
   component DayPanel: Rectangle {
     id: dayPanelRoot
     radius: Style.cornerRadius
     color: Style.normalFillFor(Commons.Color.foreground, Commons.Color.accent, Commons.Color.urgent)
+
+    readonly property var allDayEvents: root.selectedEvents.filter(function(event) { return event && event.allDay === true })
+    readonly property var hours: Model.timelineHours(root.eventGroups, root.selectedKey, 8, 18)
+    readonly property var segments: Model.layoutTimedEvents(root.eventGroups, root.selectedKey, hours.start, hours.end)
 
     Column {
       anchors.fill: parent
@@ -3498,17 +3517,105 @@ Panel {
       }
 
       Flickable {
+        id: allDayScroll
+        visible: dayPanelRoot.allDayEvents.length > 0
         width: parent.width
-        height: Math.max(0, parent.height - dayPanelTitle.height - parent.spacing)
+        height: visible ? Math.min(allDayList.height, Math.round(dayPanelRoot.height * 0.3)) : 0
         contentWidth: width
-        contentHeight: dayEventList.height
+        contentHeight: allDayList.height
         clip: true
         boundsBehavior: Flickable.StopAtBounds
         EventList {
-          id: dayEventList
+          id: allDayList
           width: parent.width
-          events: root.selectedEvents
-          emptyText: "No events for this day."
+          events: dayPanelRoot.allDayEvents
+          emptyText: ""
+        }
+      }
+
+      Item {
+        id: dayTimeline
+        width: parent.width
+        height: Math.max(Style.space(120), parent.height - dayPanelTitle.height - parent.spacing - (allDayScroll.visible ? allDayScroll.height + parent.spacing : 0))
+        readonly property int hourCount: dayPanelRoot.hours.end - dayPanelRoot.hours.start
+        readonly property real hourHeight: height / Math.max(1, hourCount)
+        // Label every hour when there's room, otherwise every second hour.
+        readonly property int labelStep: hourHeight >= Style.space(22) ? 1 : 2
+        readonly property real labelWidth: Style.space(48)
+
+        function yForHour(hour) {
+          return (hour - dayPanelRoot.hours.start) * hourHeight
+        }
+
+        Repeater {
+          model: dayTimeline.hourCount + 1
+          Item {
+            required property int index
+            readonly property int hour: dayPanelRoot.hours.start + index
+            y: dayTimeline.yForHour(hour)
+            width: dayTimeline.width
+            height: 1
+
+            Rectangle {
+              x: dayTimeline.labelWidth
+              width: parent.width - dayTimeline.labelWidth
+              height: 1
+              color: Util.alpha(Commons.Color.muted, 0.35)
+            }
+            Text {
+              visible: parent.index % dayTimeline.labelStep === 0 && parent.index < dayTimeline.hourCount
+              y: -Math.round(implicitHeight / 2)
+              width: dayTimeline.labelWidth - Style.space(6)
+              horizontalAlignment: Text.AlignRight
+              text: root.timeText(parent.hour, root.timeFormat)
+              color: Commons.Color.muted
+              font.family: root.bar ? root.bar.fontFamily : Style.font.family
+              font.pixelSize: Math.max(9, Style.font.caption - 1)
+            }
+          }
+        }
+
+        Item {
+          id: dayLanes
+          x: dayTimeline.labelWidth
+          width: parent.width - dayTimeline.labelWidth
+          height: parent.height
+
+          Repeater {
+            model: dayPanelRoot.segments
+            EventCard {
+              required property var modelData
+              readonly property real laneGap: Style.space(3)
+              readonly property real laneWidth: (dayLanes.width - Style.space(4) - (modelData.lanes - 1) * laneGap) / modelData.lanes
+              x: Style.space(4) + modelData.lane * (laneWidth + laneGap)
+              y: dayTimeline.yForHour(modelData.startHour) + 1
+              width: laneWidth
+              height: Math.max(Style.space(14), (modelData.endHour - modelData.startHour) * dayTimeline.hourHeight - 2)
+              mode: "block"
+              event: modelData.event
+              onClicked: function(mouse) { root.handleEventClick(event, mouse, this) }
+            }
+          }
+        }
+
+        Rectangle {
+          readonly property real nowHour: root.now.getHours() + root.now.getMinutes() / 60
+          visible: root.selectedKey === root.todayKey && nowHour >= dayPanelRoot.hours.start && nowHour <= dayPanelRoot.hours.end
+          z: 5
+          x: dayTimeline.labelWidth - Style.space(4)
+          y: dayTimeline.yForHour(nowHour) - height / 2
+          width: parent.width - x
+          height: 2
+          color: Commons.Color.urgent
+        }
+
+        Text {
+          visible: root.selectedEvents.length === 0
+          anchors.centerIn: dayLanes
+          text: "No events for this day."
+          color: Commons.Color.muted
+          font.family: root.bar ? root.bar.fontFamily : Style.font.family
+          font.pixelSize: Style.font.bodySmall
         }
       }
     }

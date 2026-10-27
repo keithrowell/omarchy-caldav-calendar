@@ -339,4 +339,19 @@ assert.equal(groups[1].calendars[0].index, 1)
 assert.equal(model.calendarDisplayColor({ id: 'm', color: '#FFCC00FF' }, {}, 0), '#ffcc00')
 assert.equal(model.calendarDisplayColor({ id: 'p', color: '#000000FF' }, { p: '#1E66F5' }, 0), '#1e66f5')
 
+const tlEvents = model.eventsByDay([
+  { id: 'early', start: localIso('2026-08-20', '06:30'), end: localIso('2026-08-20', '07:15') },
+  { id: 'late', start: localIso('2026-08-20', '19:00'), end: localIso('2026-08-20', '20:30') },
+  { id: 'allday', allDay: true, start: '2026-08-20', end: '2026-08-21' }
+])
+assert.deepEqual(model.timelineHours(tlEvents, '2026-08-20', 8, 18), { start: 6, end: 21 })
+assert.deepEqual(model.timelineHours(tlEvents, '2026-08-22', 8, 18), { start: 8, end: 18 })
+const tallGrid = model.monthGrid(2026, 7, 1, '', model.eventsByDay([
+  { id: 'a', start: localIso('2026-08-20', '09:00'), end: localIso('2026-08-20', '10:00') },
+  { id: 'b', start: localIso('2026-08-20', '11:00'), end: localIso('2026-08-20', '12:00') },
+  { id: 'c', start: localIso('2026-08-20', '13:00'), end: localIso('2026-08-20', '14:00') }
+]), 5).flatMap(week => week.days).find(day => day.key === '2026-08-20')
+assert.equal(tallGrid.previews.length, 3)
+assert.equal(tallGrid.extra, 0)
+
 console.log('ok - calendar model')

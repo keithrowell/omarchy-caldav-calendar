@@ -353,6 +353,21 @@ function layoutTimedEvents(events, dayKey, hourStart, hourEnd) {
   return segments
 }
 
+// Whole hours for the day panel's timeline: at least defaultStart to
+// defaultEnd, widened to take in every timed event that day.
+function timelineHours(events, dayKey, defaultStart, defaultEnd) {
+  var start = defaultStart
+  var end = defaultEnd
+  eventsForDay(events, dayKey).forEach(function(event) {
+    if (event.allDay === true) return
+    start = Math.min(start, Math.floor(eventHour(event, dayKey)))
+    end = Math.max(end, Math.ceil(eventEndHour(event, dayKey)))
+  })
+  start = Math.max(0, start)
+  end = Math.min(24, Math.max(start + 1, end))
+  return { start: start, end: end }
+}
+
 function eventCountForDay(events, key) {
   return eventsForDay(events, key).length
 }
@@ -415,7 +430,9 @@ function isoWeek(year, month, day) {
   return Math.ceil((((date - yearStart) / 86400000) + 1) / 7)
 }
 
-function monthGrid(year, month, weekStart, todayKey, groupedEvents) {
+function monthGrid(year, month, weekStart, todayKey, groupedEvents, previewLimit) {
+  // Taller cells (the app window) show more events before "+N more".
+  var limit = Math.max(1, Math.floor(Number(previewLimit) || 2))
   var cursor = startOfWeek(new Date(year, month, 1), weekStart)
   var weeks = []
   for (var row = 0; row < 6; row++) {
@@ -433,8 +450,8 @@ function monthGrid(year, month, weekStart, todayKey, groupedEvents) {
         weekend: cursor.getDay() === 0 || cursor.getDay() === 6,
         today: key === todayKey,
         eventCount: dayEvents.length,
-        previews: dayEvents.slice(0, 2),
-        extra: Math.max(0, dayEvents.length - 2)
+        previews: dayEvents.slice(0, limit),
+        extra: Math.max(0, dayEvents.length - limit)
       })
       cursor = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + 1)
     }
@@ -1169,6 +1186,7 @@ if (typeof module !== 'undefined') module.exports = {
   parseOperationResponse,
   plainDisplay,
   calendarGroups,
+  timelineHours,
   calendarHidden,
   hexColorInput,
   visibleEventsByDay,
