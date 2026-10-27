@@ -302,8 +302,32 @@ function eventEndHour(event, dayKey) {
   return end.getHours() + end.getMinutes() / 60
 }
 
+// A timed event that runs through the whole of a day (an overnight stay,
+// a multi-day trip) belongs with that day's all-day entries rather than as
+// a full-height block that squeezes the day's other events.
+function coversWholeDay(event, key) {
+  if (!event || event.allDay === true) return false
+  var start = parseDateTime(event.start)
+  var end = parseDateTime(event.end)
+  var day = dateFromKey(key, null)
+  if (!start || !end || !day) return false
+  var next = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1)
+  return start <= day && end >= next
+}
+
+// All-day entries for a day, including timed events that cover the whole
+// day. Those come back as copies marked wholeDay, so the card can style
+// them as all-day while editing still sees the real times.
 function allDayEventsForDay(events, key) {
-  return eventsForDay(events, key).filter(function(event) { return event.allDay === true })
+  return eventsForDay(events, key).filter(function(event) {
+    return event.allDay === true || coversWholeDay(event, key)
+  }).map(function(event) {
+    if (event.allDay === true) return event
+    var copy = {}
+    Object.keys(event).forEach(function(name) { copy[name] = event[name] })
+    copy.wholeDay = true
+    return copy
+  })
 }
 
 function nextDateKey(dayKey) {
@@ -314,7 +338,7 @@ function nextDateKey(dayKey) {
 }
 
 function layoutTimedEvents(events, dayKey, hourStart, hourEnd) {
-  var segments = eventsForDay(events, dayKey).filter(function(event) { return event.allDay !== true }).map(function(event) {
+  var segments = eventsForDay(events, dayKey).filter(function(event) { return event.allDay !== true && !coversWholeDay(event, dayKey) }).map(function(event) {
     var start = Math.max(hourStart, eventHour(event, dayKey))
     var end = Math.min(hourEnd, eventEndHour(event, dayKey))
     if (end <= start) end = Math.min(hourEnd, start + 0.5)
@@ -1186,6 +1210,7 @@ if (typeof module !== 'undefined') module.exports = {
   parseOperationResponse,
   plainDisplay,
   calendarGroups,
+  coversWholeDay,
   timelineHours,
   calendarHidden,
   hexColorInput,

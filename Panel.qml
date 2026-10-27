@@ -3504,7 +3504,7 @@ Panel {
     radius: Style.cornerRadius
     color: Style.normalFillFor(Commons.Color.foreground, Commons.Color.accent, Commons.Color.urgent)
 
-    readonly property var allDayEvents: root.selectedEvents.filter(function(event) { return event && event.allDay === true })
+    readonly property var allDayEvents: Model.allDayEventsForDay(root.eventGroups, root.selectedKey)
     readonly property var hours: Model.timelineHours(root.eventGroups, root.selectedKey, 8, 18)
     readonly property var segments: Model.layoutTimedEvents(root.eventGroups, root.selectedKey, hours.start, hours.end)
 
@@ -3965,7 +3965,7 @@ Panel {
     readonly property bool wrapTitle: mode === "block" && height >= Style.space(48)
     // All-day entries are a light tint with an outline, so timed events
     // stand out against them.
-    readonly property bool allDay: !!(event && event.allDay === true)
+    readonly property bool allDay: !!(event && (event.allDay === true || event.wholeDay === true))
     readonly property real fillStrength: allDay ? 0.2 : 0.72
     readonly property color labelColor: allDay ? Commons.Color.foreground : Model.contrastingForeground(card.accentColor, card.fillStrength, Commons.Color.foreground, Commons.Color.popups.background)
 
