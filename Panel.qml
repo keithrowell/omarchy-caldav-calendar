@@ -1029,7 +1029,8 @@ Panel {
           readonly property real rightWidth: actionControls.implicitWidth + calendarsMenuButton.width + dayPanelToggle.width + (windowButton.visible ? windowButton.width : 0) + settingsTopButton.width + Style.space(28)
           // A narrow window puts the title on its own row above the controls,
           // and a very narrow one gives the view buttons a row of their own.
-          readonly property bool stacked: width < viewControls.implicitWidth + titleNav.width + rightWidth + Style.space(24)
+          readonly property real sideRoom: (width - titleNav.width) / 2 - Style.space(12)
+          readonly property bool stacked: viewControls.implicitWidth > sideRoom || rightWidth > sideRoom
           readonly property bool narrow: width < viewControls.implicitWidth + rightWidth + Style.space(16)
           readonly property int rows: narrow ? 3 : (stacked ? 2 : 1)
           readonly property real rowStep: rowHeight + Style.space(8)
