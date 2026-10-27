@@ -1020,16 +1020,22 @@ Panel {
           width: parent.width
           readonly property real rowHeight: Math.max(viewControls.implicitHeight, titleColumn.implicitHeight, actionControls.implicitHeight, settingsTopButton.implicitHeight)
           readonly property real rightWidth: actionControls.implicitWidth + calendarsMenuButton.width + dayPanelToggle.width + (windowButton.visible ? windowButton.width : 0) + settingsTopButton.width + Style.space(28)
-          // A narrow window puts the title on its own row above the controls.
+          // A narrow window puts the title on its own row above the controls,
+          // and a very narrow one gives the view buttons a row of their own.
           readonly property bool stacked: width < viewControls.implicitWidth + titleNav.width + rightWidth + Style.space(24)
-          readonly property real controlsOffset: stacked ? (rowHeight + Style.space(8)) / 2 : 0
-          height: stacked ? rowHeight * 2 + Style.space(8) : rowHeight
+          readonly property bool narrow: width < viewControls.implicitWidth + rightWidth + Style.space(16)
+          readonly property int rows: narrow ? 3 : (stacked ? 2 : 1)
+          readonly property real rowStep: rowHeight + Style.space(8)
+          readonly property real titleOffset: -(rows - 1) * rowStep / 2
+          readonly property real viewOffset: titleOffset + (rows > 1 ? rowStep : 0)
+          readonly property real controlsOffset: (rows - 1) * rowStep / 2
+          height: rowHeight * rows + Style.space(8) * (rows - 1)
 
           Row {
             id: viewControls
             anchors.left: parent.left
             anchors.verticalCenter: parent.verticalCenter
-            anchors.verticalCenterOffset: headerBar.controlsOffset
+            anchors.verticalCenterOffset: headerBar.viewOffset
             spacing: Style.space(4)
             ViewButton { text: "Month"; selected: root.viewMode === "month"; onClicked: root.setView("month"); onDoubleClicked: { root.setView("month"); root.goToToday() } }
             ViewButton { text: "Week"; selected: root.viewMode === "week"; onClicked: root.setView("week"); onDoubleClicked: { root.setView("week"); root.goToToday() } }
@@ -1043,7 +1049,7 @@ Panel {
             height: Math.max(previousButton.implicitHeight, titleColumn.implicitHeight, nextButton.implicitHeight)
             anchors.horizontalCenter: parent.horizontalCenter
             anchors.verticalCenter: parent.verticalCenter
-            anchors.verticalCenterOffset: -headerBar.controlsOffset
+            anchors.verticalCenterOffset: headerBar.titleOffset
 
             PanelActionButton {
               id: previousButton
@@ -1837,7 +1843,8 @@ Panel {
               }
               DayPanel {
                 id: dayPanel
-                visible: root.showDayPanel
+                // A narrow window gives the whole width to the calendar.
+                visible: root.showDayPanel && (!root.windowMode || parent.width >= Style.space(760))
                 width: Style.space(250)
                 height: parent.children[0].height
               }
@@ -3476,7 +3483,8 @@ Panel {
               Text {
                 visible: monthDay.modelData.extra > 0
                 width: parent.width
-                text: "+" + monthDay.modelData.extra + " more"
+                text: "+" + monthDay.modelData.extra + (width < Style.space(70) ? "" : " more")
+                elide: Text.ElideRight
                 color: monthDay.modelData.inMonth ? Commons.Color.foreground : Util.alpha(Commons.Color.foreground, 0.55)
                 font.family: root.bar ? root.bar.fontFamily : Style.font.family
                 font.pixelSize: Math.max(9, Style.font.caption - 1)
