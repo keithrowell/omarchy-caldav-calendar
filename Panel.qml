@@ -3635,7 +3635,12 @@ Panel {
     readonly property int hourStart: root.viewMode === "day" ? root.dayStartHour : (root.viewMode === "work-week" ? root.workWeekStartHour : root.weekStartHour)
     readonly property int hourEnd: root.viewMode === "day" ? root.dayEndHour : (root.viewMode === "work-week" ? root.workWeekEndHour : root.weekEndHour)
     readonly property int hourCount: hourEnd - hourStart
-    readonly property int hourHeight: root.viewMode === "day" ? Style.space(50) : Style.space(42)
+    readonly property int baseHourHeight: root.viewMode === "day" ? Style.space(50) : Style.space(42)
+    // In the window the hours stretch to fill the height below the headings,
+    // and only scroll when even the base size doesn't fit.
+    readonly property int hourHeight: viewportHeight > 0
+      ? Math.max(baseHourHeight, Math.floor((viewportHeight - headerRowsHeight) / Math.max(1, hourCount)))
+      : baseHourHeight
     readonly property int gridLeft: Style.space(48)
     readonly property int gridRight: Style.space(8)
     // Height the view may use in the window (0 in the popup), and the height
