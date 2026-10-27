@@ -1238,6 +1238,7 @@ Panel {
             Rectangle {
               visible: root.creatingEvent && !root.showingSettings
               width: parent.width
+              Keys.onEscapePressed: root.cancelCreatingEvent()
               height: createForm.implicitHeight + Style.space(20)
               radius: Style.cornerRadius
               color: Style.hoverFillFor(Commons.Color.foreground, Commons.Color.accent)
