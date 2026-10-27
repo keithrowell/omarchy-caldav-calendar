@@ -1858,7 +1858,8 @@ Panel {
               DayPanel {
                 id: dayPanel
                 // A narrow window gives the whole width to the calendar.
-                visible: root.showDayPanel && (!root.windowMode || parent.width >= Style.space(760))
+                // Day view already shows the day, so the column would repeat it.
+                visible: root.showDayPanel && root.viewMode !== "day" && (!root.windowMode || parent.width >= Style.space(760))
                 width: Style.space(250)
                 height: parent.children[0].height
               }
