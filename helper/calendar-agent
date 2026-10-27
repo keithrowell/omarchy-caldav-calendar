@@ -1,0 +1,368 @@
+#!/usr/bin/env python3
+"""Turn a plain request ("tennis next thursday") into a proposed event.
+
+Reads one JSON request on stdin:
+
+  {"prompt": "...", "history": [{"role": "user"|"agent", "text": "..."}],
+   "hidden": {calendarId: true}, "names": {calendarId: name},
+   "defaultCalendarId": "...", "timeFormat": "12h"|"24h"}
+
+and prints one JSON answer:
+
+  {"ok": true, "agent": "claude", "reply": "...", "question": "",
+   "event": {title, calendarId, allDay, date, start, end, location, rrule} | null,
+   "conflicts": ["..."]}
+
+The agent is the one chosen with `omarchy default agent`. It gets the
+writable calendars, everything already booked over the next six weeks, and a
+summary of the last three months as the user's habits. It runs with no tools
+and no access beyond this prompt; the panel only fills its form from the
+answer, so nothing is saved until the user presses Save.
+"""
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+from collections import defaultdict
+from datetime import date, datetime, timedelta
+from pathlib import Path
+
+AGENT_TIMEOUT = 120  # seconds; a cold start of a headless agent can take a while
+UPCOMING_DAYS = 42
+HISTORY_DAYS = 90
+MAX_UPCOMING = 700
+MAX_HABITS = 60
+
+SCHEMA = {
+    "type": "object",
+    "properties": {
+        "reply": {"type": "string", "description": "One or two short sentences for the user: what you chose and why, naming the date in words, and any clash you avoided or could not avoid."},
+        "action": {"type": "string", "enum": ["propose", "ask"]},
+        "question": {"type": "string", "description": "When action is ask: the one thing you need to know. Empty otherwise."},
+        "event": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "calendarId": {"type": "string"},
+                "allDay": {"type": "boolean"},
+                "date": {"type": "string", "description": "YYYY-MM-DD, the start date"},
+                "start": {"type": "string", "description": "HH:MM 24-hour local time, empty when allDay"},
+                "end": {"type": "string", "description": "HH:MM 24-hour local time, empty when allDay"},
+                "location": {"type": "string"},
+                "rrule": {"type": "string", "description": "RFC 5545 RRULE without the RRULE: prefix, e.g. FREQ=WEEKLY;BYDAY=TH, or empty for a one-off"},
+            },
+            "required": ["title", "calendarId", "allDay", "date", "start", "end", "location", "rrule"],
+        },
+    },
+    "required": ["reply", "action", "question", "event"],
+}
+
+SYSTEM = """You are the scheduling assistant inside the user's desktop calendar. You turn a short request such as "tennis next thursday" into one well-chosen event, the way a capable personal assistant who knows this person's calendar would.
+
+How to choose:
+- Work out the date from today's date. "Next <weekday>" means the first such day after today unless the user's habits or wording say otherwise. Always name the chosen date in words in your reply, e.g. "Thursday 29 October", so a misread is easy to spot.
+- When no time is given, use the time this person usually does that activity (see Habits). Failing that, pick a sensible time for the activity and say so.
+- Use the usual duration, location and calendar from Habits for the same kind of event. Otherwise use a sensible duration and the default calendar.
+- Check Booked for clashes with timed events on the chosen day. Avoid a clash when the request leaves room to (no exact time given): move to the nearest free slot that suits the activity and say what you moved around. When the user gave an exact time that clashes, keep their time and name the clash in your reply.
+- Ignore all-day entries when checking for clashes unless they mean the person is away.
+- Only the user's own commitments are clashes. Many calendars here track other people or things: a child's school or music timetable, a family member's schedule or work roster, sport fixtures, TV shows, birthdays, payments and other reminders. Judge from the calendar name and the event. Events like those are context (who needs picking up, when someone is away), never a reason to move the user's event, unless the request involves that person.
+- Give the event a short, natural title in the user's own style (see Habits).
+- Use rrule only when the user asks for a repeat ("every thursday", "weekly").
+- calendarId must be one of the ids in Writable calendars. Prefer the calendar this kind of event usually goes in (Habits). Never pick a calendar marked "this computer only" unless asked: it doesn't reach the user's phone. Personal things go in iCloud, work in the work account.
+- If the request is too vague to place sensibly, set action to "ask" and ask one short question; still fill event with your best guess.
+- Follow-up messages refine the previous proposal ("make it 7", "the week after"); keep everything else the same.
+
+Write the reply in plain Australian English, one or two short sentences, no lists or markdown."""
+
+
+def cache_path() -> Path:
+    override = os.environ.get("OMARCHY_CALENDAR_CACHE")
+    return (Path(override) if override else Path.home() / ".local/share/omarchy-calendar") / "cache.json"
+
+
+def local(iso: str):
+    if not iso:
+        return None
+    try:
+        moment = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if moment.tzinfo is None:
+        return moment
+    return moment.astimezone().replace(tzinfo=None)
+
+
+def event_day(event) -> date | None:
+    if event.get("allDay"):
+        try:
+            return date.fromisoformat(str(event.get("start", ""))[:10])
+        except ValueError:
+            return None
+    start = local(event.get("start", ""))
+    return start.date() if start else None
+
+
+def describe(event, names) -> str:
+    name = names.get(event.get("calendarId")) or event.get("calendarName") or "Calendar"
+    title = " ".join(str(event.get("title") or "(no title)").split())
+    if event.get("allDay"):
+        day = event_day(event)
+        return f"{day:%a %d %b} all day  {title}  [{name}]" if day else ""
+    start, end = local(event.get("start", "")), local(event.get("end", ""))
+    if not start:
+        return ""
+    finish = f"{end:%H:%M}" if end and end.date() == start.date() else (f"{end:%a %d %b %H:%M}" if end else "?")
+    place = event.get("location") or ""
+    place = f"  @ {' '.join(place.split())[:60]}" if place else ""
+    return f"{start:%a %d %b %H:%M}-{finish}  {title}  [{name}]{place}"
+
+
+def habits(events, names, writable_ids, today: date) -> list[str]:
+    """Recurring kinds of event from the last HISTORY_DAYS on writable
+    calendars: how often, which weekdays, usual time, duration and place."""
+    since = today - timedelta(days=HISTORY_DAYS)
+    groups = defaultdict(list)
+    for event in events:
+        if event.get("calendarId") not in writable_ids or event.get("allDay"):
+            continue
+        start, end = local(event.get("start", "")), local(event.get("end", ""))
+        if not start or not end or not (since <= start.date() <= today):
+            continue
+        key = " ".join(str(event.get("title") or "").lower().split())
+        if key:
+            groups[key].append((start, end, event))
+    lines = []
+    for key, items in sorted(groups.items(), key=lambda pair: -len(pair[1]))[:MAX_HABITS]:
+        starts = defaultdict(int)
+        days = defaultdict(int)
+        durations = defaultdict(int)
+        places = defaultdict(int)
+        calendars = defaultdict(int)
+        for start, end, event in items:
+            starts[f"{start:%H:%M}"] += 1
+            days[f"{start:%a}"] += 1
+            durations[int((end - start).total_seconds() // 60)] += 1
+            if event.get("location"):
+                places[" ".join(event["location"].split())[:60]] += 1
+            calendars[names.get(event.get("calendarId")) or event.get("calendarName") or "?"] += 1
+        top = lambda counts: max(counts, key=counts.get) if counts else ""
+        title = " ".join(str(items[-1][2].get("title") or "").split())
+        weekday_list = ", ".join(day for day, _ in sorted(days.items(), key=lambda pair: -pair[1])[:3])
+        place = top(places)
+        lines.append(
+            f"{title}: {len(items)}x, usually {weekday_list} at {top(starts)} for {top(durations)} min"
+            f" in [{top(calendars)}]" + (f" @ {place}" if place else "")
+            + f", last {items[-1][0]:%d %b}"
+        )
+    return lines
+
+
+def build_prompt(request, cache) -> tuple[str, dict]:
+    hidden = request.get("hidden") or {}
+    names = request.get("names") or {}
+    calendars = [c for c in cache.get("calendars", []) if c.get("id")]
+    for calendar in calendars:
+        names.setdefault(calendar["id"], calendar.get("name") or "Calendar")
+    writable = [c for c in calendars if not c.get("readonly") and not hidden.get(c["id"])]
+    writable_ids = {c["id"] for c in writable}
+    default_id = request.get("defaultCalendarId") or (writable[0]["id"] if writable else "")
+    if default_id not in writable_ids and writable:
+        default_id = writable[0]["id"]
+
+    now = datetime.now()
+    today = now.date()
+    events = cache.get("events", [])
+    visible = [e for e in events if not hidden.get(e.get("calendarId"))]
+
+    upcoming = []
+    horizon = today + timedelta(days=UPCOMING_DAYS)
+    for event in visible:
+        day = event_day(event)
+        if day and today - timedelta(days=1) <= day <= horizon:
+            line = describe(event, names)
+            if line:
+                upcoming.append((local(event.get("start", "")) or datetime.combine(day, datetime.min.time()), line))
+    upcoming.sort()
+    booked = [line for _, line in upcoming[:MAX_UPCOMING]]
+
+    habit_lines = habits(events, names, writable_ids, today)
+
+    calendar_lines = [f"{c['id']}  {names[c['id']]}  ({account(c)})" + ("  default" if c["id"] == default_id else "") for c in writable]
+
+    history = request.get("history") or []
+    conversation = "\n".join(f"{'User' if turn.get('role') == 'user' else 'You'}: {turn.get('text', '')}" for turn in history[-8:])
+
+    tz = now.astimezone().tzname()
+    prompt = f"""Today is {now:%A %d %B %Y}, {now:%H:%M} local time ({tz}).
+
+Writable calendars (id  name):
+{chr(10).join(calendar_lines) or '(none)'}
+
+Habits over the last {HISTORY_DAYS} days:
+{chr(10).join(habit_lines) or '(none)'}
+
+Booked from yesterday to {horizon:%d %b %Y}:
+{chr(10).join(booked) or '(nothing)'}
+
+{('Conversation so far:' + chr(10) + conversation + chr(10) + chr(10)) if conversation else ''}Request: {request.get('prompt', '').strip()}
+"""
+    return prompt, {"writable": writable_ids, "default": default_id, "visible": visible, "names": names}
+
+
+def account(calendar) -> str:
+    host = str(calendar.get("host") or "").lower()
+    if "icloud" in host:
+        return "iCloud"
+    if "google" in host:
+        return "Google"
+    if calendar.get("provider") == "caldav":
+        return "CalDAV"
+    return "this computer only"
+
+
+def agent_name() -> str:
+    try:
+        result = subprocess.run(["omarchy-default-agent"], capture_output=True, text=True, timeout=10)
+        return result.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def find(command: str) -> str | None:
+    found = shutil.which(command)
+    if found:
+        return found
+    for folder in (Path.home() / ".local/share/mise/shims", Path.home() / ".local/bin"):
+        candidate = folder / command
+        if candidate.exists():
+            return str(candidate)
+    return None
+
+
+def run_claude(prompt: str, workdir: str) -> dict:
+    binary = find("claude")
+    if not binary:
+        raise RuntimeError("Claude Code isn't installed.")
+    command = [
+        binary, "-p", "--model", os.environ.get("CALENDAR_AGENT_MODEL", "sonnet"),
+        "--tools", "", "--setting-sources", "", "--strict-mcp-config", "--no-session-persistence",
+        "--system-prompt", SYSTEM, "--output-format", "json", "--json-schema", json.dumps(SCHEMA), prompt,
+    ]
+    result = subprocess.run(command, capture_output=True, text=True, timeout=AGENT_TIMEOUT, cwd=workdir)
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        raise RuntimeError((result.stderr or result.stdout or "Claude gave no answer.").strip()[:300])
+    if payload.get("is_error"):
+        raise RuntimeError(str(payload.get("result") or "Claude reported an error.")[:300])
+    answer = payload.get("structured_output")
+    if not isinstance(answer, dict):
+        answer = json.loads(payload.get("result") or "{}")
+    return answer
+
+
+def run_codex(prompt: str, workdir: str) -> dict:
+    binary = find("codex")
+    if not binary:
+        raise RuntimeError("Codex isn't installed.")
+    schema_file = Path(workdir) / "schema.json"
+    schema_file.write_text(json.dumps(SCHEMA))
+    out_file = Path(workdir) / "answer.json"
+    full = SYSTEM + "\n\n" + prompt + "\nAnswer with JSON only, matching the output schema."
+    command = [binary, "exec", "--skip-git-repo-check", "--sandbox", "read-only",
+               "--output-schema", str(schema_file), "--output-last-message", str(out_file), "-"]
+    result = subprocess.run(command, input=full, capture_output=True, text=True, timeout=AGENT_TIMEOUT, cwd=workdir)
+    if not out_file.exists():
+        raise RuntimeError((result.stderr or "Codex gave no answer.").strip()[-300:])
+    return json.loads(out_file.read_text())
+
+
+RUNNERS = {"claude": run_claude, "codex": run_codex}
+
+
+def clashes(event: dict, visible: list, names: dict) -> list[str]:
+    if event.get("allDay"):
+        return []
+    try:
+        start = datetime.fromisoformat(f"{event['date']}T{event['start']}")
+        end = datetime.fromisoformat(f"{event['date']}T{event['end']}")
+    except (KeyError, ValueError):
+        return []
+    if end <= start:
+        end = start + timedelta(hours=1)
+    found = []
+    for other in visible:
+        if other.get("allDay"):
+            continue
+        other_start, other_end = local(other.get("start", "")), local(other.get("end", ""))
+        if not other_start or not other_end:
+            continue
+        # Stays that run through the whole day aren't appointments.
+        if other_start.date() < start.date() and other_end.date() > start.date():
+            continue
+        if other_start < end and other_end > start:
+            found.append(describe(other, names))
+    return found[:5]
+
+
+def main() -> int:
+    try:
+        request = json.loads(sys.stdin.read() or "{}")
+    except json.JSONDecodeError:
+        print(json.dumps({"ok": False, "error": "Bad request."}))
+        return 0
+    if not str(request.get("prompt", "")).strip():
+        print(json.dumps({"ok": False, "error": "Say what you'd like to add."}))
+        return 0
+
+    name = agent_name()
+    runner = RUNNERS.get(name)
+    if not runner:
+        message = (f"The calendar agent works with Claude or Codex, and your default agent is {name}."
+                   if name else "No default agent is set. Choose one with: omarchy default agent claude")
+        print(json.dumps({"ok": False, "error": message}))
+        return 0
+
+    try:
+        cache = json.loads(cache_path().read_text())
+    except (OSError, json.JSONDecodeError):
+        cache = {}
+
+    prompt, facts = build_prompt(request, cache)
+    try:
+        with tempfile.TemporaryDirectory(prefix="calendar-agent-") as workdir:
+            answer = runner(prompt, workdir)
+    except subprocess.TimeoutExpired:
+        print(json.dumps({"ok": False, "agent": name, "error": "The agent took too long to answer."}))
+        return 0
+    except (RuntimeError, OSError, json.JSONDecodeError) as error:
+        print(json.dumps({"ok": False, "agent": name, "error": str(error)}))
+        return 0
+
+    event = answer.get("event") if isinstance(answer.get("event"), dict) else None
+    if event:
+        if event.get("calendarId") not in facts["writable"]:
+            event["calendarId"] = facts["default"]
+        event["allDay"] = bool(event.get("allDay"))
+        for key in ("title", "date", "start", "end", "location", "rrule"):
+            event[key] = str(event.get(key) or "").strip()
+        try:
+            date.fromisoformat(event["date"])
+        except ValueError:
+            event = None
+    print(json.dumps({
+        "ok": True,
+        "agent": name,
+        "reply": str(answer.get("reply") or "").strip(),
+        "question": str(answer.get("question") or "").strip() if answer.get("action") == "ask" else "",
+        "event": event,
+        "conflicts": clashes(event, facts["visible"], facts["names"]) if event else [],
+    }))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -28,6 +28,7 @@ The plugin needs Evolution Data Server. If it is not installed, the clock opens 
 - Optional desktop reminder 5–30 minutes before timed events
 - Show or hide each calendar from the calendar button in the header, or by account in settings. Hidden calendars keep syncing but give no reminders.
 - Pick any calendar colour with a colour picker (hue strip and saturation/brightness square), from presets, from the current Omarchy theme, or by hex value
+- Ask your agent to add an event in plain words ("tennis next Thursday"). It uses the agent set with `omarchy default agent` (Claude or Codex), reads your calendars and the last three months of habits, avoids clashes with your own commitments, and fills in the new-event form for you to check and save
 - Open the calendar in its own window that tiles like any other app: the window button in the header, `scripts/calendar-window`, or `omarchy-shell omarchy.clock openWindow`
 
 <p align="center">

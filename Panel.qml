@@ -66,6 +66,11 @@ Panel {
   property var draftCalendarColors: ({})
   property var draftHiddenCalendars: ({})
   property var removeCandidate: null
+  property string createTab: "form"
+  property var agentTurns: []
+  property var agentProposal: null
+  property bool agentWaiting: false
+  property string agentName: ""
   property string removeCandidateName: ""
   property bool draggingTimeSelection: false
   property string dragDayKey: ""
@@ -282,6 +287,7 @@ Panel {
   }
 
   function startCreatingEvent() {
+    resetAgent()
     createError = ""
     editingEvent = null
     showingSetup = false
@@ -313,6 +319,7 @@ Panel {
   }
 
   function startCreatingEventAt(dayKey, startHour, endHour) {
+    resetAgent()
     var first = Math.min(startHour, endHour)
     var last = Math.max(startHour, endHour)
     if (last <= first) last = first + root.fixedEventDurationMinutes / 60
@@ -768,7 +775,92 @@ Panel {
     setupPassword = ""
   }
 
+  function resetAgent() {
+    if (agentWaiting && calendarService) calendarService.cancelAgent()
+    agentWaiting = false
+    agentTurns = []
+    agentProposal = null
+    createTab = "form"
+  }
+
+  function askAgent(text) {
+    var prompt = String(text || "").trim()
+    if (!prompt || !calendarService) return
+    var history = []
+    for (var i = 0; i < agentTurns.length; i++)
+      if (agentTurns[i].role === "user" || agentTurns[i].role === "agent") history.push({ role: agentTurns[i].role, text: agentTurns[i].text })
+    agentTurns = agentTurns.concat([{ role: "user", text: prompt }])
+    agentWaiting = true
+    calendarService.askAgent({
+      prompt: prompt,
+      history: history,
+      hidden: hiddenCalendars,
+      names: calendarNames,
+      defaultCalendarId: selectedWritableCalendarId()
+    })
+  }
+
+  function handleAgentAnswer(answer) {
+    if (!agentWaiting) return
+    agentWaiting = false
+    if (answer && answer.agent) agentName = String(answer.agent).charAt(0).toUpperCase() + String(answer.agent).slice(1)
+    if (!answer || !answer.ok) {
+      agentTurns = agentTurns.concat([{ role: "error", text: (answer && answer.error) || "The agent didn't answer." }])
+      return
+    }
+    var text = answer.reply || ""
+    if (answer.question) text = text ? text + " " + answer.question : answer.question
+    agentTurns = agentTurns.concat([{ role: "agent", text: text, conflicts: answer.conflicts || [] }])
+    // After any pending form reset from opening the form.
+    if (answer.event) Qt.callLater(function() { root.applyAgentEvent(answer.event) })
+  }
+
+  function applyAgentEvent(event) {
+    agentProposal = event
+    selectedKey = event.date
+    setCreateDate(event.date)
+    createAllDay = event.allDay === true
+    if (!createAllDay) {
+      createStartTime = event.start || "09:00"
+      createEndTime = event.end || createStartTime
+    }
+    if (event.calendarId) createCalendarId = event.calendarId
+    createRecurrence = event.rrule ? Model.parseRRule(event.rrule, event.date) : Model.defaultRecurrence(event.date)
+    titleField.text = event.title || ""
+    locationField.text = event.location || ""
+    var date = Model.dateFromKey(event.date, today)
+    viewYear = date.getFullYear()
+    viewMonth = date.getMonth()
+    refresh()
+  }
+
+  function agentProposalColor() {
+    var calendar = agentProposal && calendarService ? calendarService.calendarById(agentProposal.calendarId) : null
+    return calendar ? Model.calendarDisplayColor(calendar, calendarColors, 0) : Commons.Color.accent
+  }
+
+  function agentProposalSummary() {
+    var event = agentProposal
+    if (!event) return ""
+    var date = Model.dateFromKey(event.date, today)
+    var when = Qt.formatDate(date, "dddd d MMMM")
+    if (!event.allDay) when += ", " + timeText(hourFromSlot(event.start), timeFormat) + " to " + timeText(hourFromSlot(event.end), timeFormat)
+    else when += ", all day"
+    var calendar = calendarService ? calendarService.calendarById(event.calendarId) : null
+    var parts = [event.title, when]
+    if (calendar) parts.push(Model.calendarDisplayName(calendar, calendarNames))
+    if (event.location) parts.push(event.location)
+    if (event.rrule) parts.push("repeats")
+    return parts.join("\n")
+  }
+
+  function hourFromSlot(slot) {
+    var bits = String(slot || "0:0").split(":")
+    return (parseInt(bits[0], 10) || 0) + (parseInt(bits[1], 10) || 0) / 60
+  }
+
   function cancelCreatingEvent() {
+    resetAgent()
     creatingEvent = false
     editingEvent = null
     createRecurrence = Model.defaultRecurrence(selectedKey)
@@ -946,6 +1038,7 @@ Panel {
       if (ok || root.creatingEvent) return
       root.createError = message || "Could not save the event."
     }
+    function onAgentAnswered(answer) { root.handleAgentAnswer(answer) }
     function onSetupFinished(ok, message) {
       if (ok) {
         root.showingSetup = false
@@ -1236,19 +1329,37 @@ Panel {
             SettingsPage { visible: root.showingSettings; width: parent.width }
 
             Rectangle {
+              id: createBox
               visible: root.creatingEvent && !root.showingSettings
               width: parent.width
+              // Side by side when there's room, otherwise Form and Ask tabs.
+              readonly property bool wide: width >= Style.space(900) && !root.editingEvent
+              height: (createTabs.visible ? createTabs.height + Style.space(10) : 0) + Math.max(createForm.visible ? createForm.implicitHeight : 0, agentPane.visible ? agentPane.implicitHeight : 0) + Style.space(20)
               Keys.onEscapePressed: root.cancelCreatingEvent()
-              height: createForm.implicitHeight + Style.space(20)
               radius: Style.cornerRadius
               color: Style.hoverFillFor(Commons.Color.foreground, Commons.Color.accent)
               border.color: Commons.Color.accent
               border.width: 1
 
+              SegmentedChoice {
+                id: createTabs
+                visible: !createBox.wide && !root.editingEvent
+                anchors.top: parent.top
+                anchors.left: parent.left
+                anchors.margins: Style.space(10)
+                value: root.createTab
+                options: [{ value: "form", label: "Form" }, { value: "agent", label: "Ask agent" }]
+                onChosen: function(value) { root.createTab = value }
+              }
+
               Column {
                 id: createForm
-                anchors.fill: parent
+                visible: createBox.wide || root.editingEvent || root.createTab === "form"
+                anchors.top: createTabs.visible ? createTabs.bottom : parent.top
+                anchors.left: parent.left
                 anchors.margins: Style.space(10)
+                anchors.topMargin: Style.space(10)
+                width: createBox.wide ? Math.round((parent.width - Style.space(30)) * 0.56) : parent.width - Style.space(20)
                 spacing: Style.space(8)
 
                 Text {
@@ -1690,6 +1801,120 @@ Panel {
                     spacing: Style.space(8)
                     Button { text: "Cancel"; onClicked: root.cancelCreatingEvent() }
                     Button { text: root.editingEvent ? "Save" : "Create"; selected: true; onClicked: root.commitCreatingEvent() }
+                  }
+                }
+              }
+              // Ask the default agent (omarchy default agent) to place an
+              // event from a plain request. Its proposal fills the form.
+              Column {
+                id: agentPane
+                visible: !root.editingEvent && (createBox.wide || root.createTab === "agent")
+                anchors.top: createTabs.visible ? createTabs.bottom : parent.top
+                anchors.right: parent.right
+                anchors.margins: Style.space(10)
+                anchors.topMargin: Style.space(10)
+                width: createBox.wide ? Math.round((parent.width - Style.space(30)) * 0.44) : parent.width - Style.space(20)
+                spacing: Style.space(8)
+
+                Text {
+                  width: parent.width
+                  text: root.agentName ? "Ask " + root.agentName : "Ask your agent"
+                  color: Commons.Color.foreground
+                  font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                  font.pixelSize: Style.font.body
+                  font.bold: true
+                }
+                Text {
+                  visible: root.agentTurns.length === 0
+                  width: parent.width
+                  text: "Say what to add, like “tennis next Thursday” or “dinner with Mum Saturday 7”. It knows your calendar and habits, avoids clashes and fills in the form for you to check."
+                  wrapMode: Text.WordWrap
+                  color: Commons.Color.muted
+                  font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                  font.pixelSize: Style.font.caption
+                }
+
+                Repeater {
+                  model: root.agentTurns
+                  Column {
+                    required property var modelData
+                    width: agentPane.width
+                    spacing: Style.space(3)
+                    Text {
+                      width: parent.width
+                      text: modelData.role === "user" ? "You: " + modelData.text : modelData.text
+                      wrapMode: Text.WordWrap
+                      textFormat: Text.PlainText
+                      color: modelData.role === "error" ? Commons.Color.urgent : (modelData.role === "user" ? Commons.Color.muted : Commons.Color.foreground)
+                      font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                      font.pixelSize: Style.font.bodySmall
+                      font.bold: modelData.role === "agent"
+                    }
+                    Repeater {
+                      model: modelData.conflicts || []
+                      Text {
+                        required property var modelData
+                        width: agentPane.width
+                        text: "Clashes with " + modelData
+                        wrapMode: Text.WordWrap
+                        textFormat: Text.PlainText
+                        color: Commons.Color.urgent
+                        font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                        font.pixelSize: Style.font.caption
+                      }
+                    }
+                  }
+                }
+
+                Rectangle {
+                  visible: root.agentProposal !== null
+                  width: parent.width
+                  height: proposalColumn.implicitHeight + Style.space(16)
+                  radius: Style.cornerRadius
+                  color: Util.alpha(root.agentProposalColor(), 0.18)
+                  border.width: 1
+                  border.color: Util.alpha(root.agentProposalColor(), 0.7)
+                  Column {
+                    id: proposalColumn
+                    anchors.fill: parent
+                    anchors.margins: Style.space(8)
+                    spacing: Style.space(6)
+                    Text {
+                      width: parent.width
+                      text: root.agentProposalSummary()
+                      wrapMode: Text.WordWrap
+                      textFormat: Text.PlainText
+                      color: Commons.Color.foreground
+                      font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                      font.pixelSize: Style.font.bodySmall
+                    }
+                    Row {
+                      spacing: Style.space(6)
+                      Button { text: "Save"; bordered: true; selected: true; onClicked: root.commitCreatingEvent() }
+                      Button { visible: !createBox.wide; text: "Check in form"; bordered: true; onClicked: root.createTab = "form" }
+                    }
+                  }
+                }
+
+                Row {
+                  width: parent.width
+                  spacing: Style.space(6)
+                  TextField {
+                    id: agentInput
+                    width: parent.width - agentSend.width - parent.spacing
+                    placeholderText: root.agentTurns.length ? "Change it, e.g. “make it 7pm”" : "e.g. tennis next Thursday"
+                    enabled: !(calendarService && calendarService.agentBusy)
+                    onAccepted: agentSend.clicked()
+                  }
+                  Button {
+                    id: agentSend
+                    text: calendarService && calendarService.agentBusy ? "Thinking…" : "Ask"
+                    bordered: true
+                    enabled: !(calendarService && calendarService.agentBusy) && agentInput.text.trim() !== ""
+                    onClicked: {
+                      root.askAgent(agentInput.text)
+                      agentInput.text = ""
+                    }
                   }
                 }
               }

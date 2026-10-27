@@ -51,6 +51,10 @@ Item {
   signal eventCreated(var event)
   signal eventSaved(bool ok, string message)
   signal setupFinished(bool ok, string message)
+  // The calendar agent's answer to askAgent(): {ok, reply, question, event,
+  // conflicts, error}.
+  signal agentAnswered(var answer)
+  property bool agentBusy: false
 
   function helperPath() {
     return decodeURIComponent(Qt.resolvedUrl("helper/omarchy-calendar-helper").toString().replace(/^file:\/\//, ""))
@@ -838,6 +842,20 @@ Item {
     reminderStateProc.running = true
   }
 
+  function askAgent(request) {
+    if (agentProc.running) agentProc.running = false
+    agentBusy = true
+    agentProc.secret = JSON.stringify(request || {})
+    agentProc.stdinEnabled = true
+    agentProc.command = [helperPath().replace(/omarchy-calendar-helper$/, "calendar-agent")]
+    agentProc.running = true
+  }
+
+  function cancelAgent() {
+    if (agentProc.running) agentProc.running = false
+    agentBusy = false
+  }
+
   function updateCalendars(entries, names, colors) {
     applyCalendarAppearance(names, colors)
     if (calendarsProc.running) calendarsProc.running = false
@@ -1018,6 +1036,30 @@ Item {
 
     onExited: function(exitCode) {
       if (exitCode === 0) root.readCache()
+    }
+  }
+
+  Process {
+    id: agentProc
+    property string secret: ""
+    running: false
+    stdinEnabled: true
+    onStarted: {
+      write(secret + "\n")
+      secret = ""
+      stdinEnabled = false
+    }
+
+    stdout: StdioCollector { id: agentOut; waitForEnd: true }
+    stderr: StdioCollector { id: agentErr; waitForEnd: true }
+
+    onExited: function(exitCode) {
+      if (!root.agentBusy) return
+      root.agentBusy = false
+      var answer = null
+      try { answer = JSON.parse(String(agentOut.text || "").trim() || "null") } catch (error) { answer = null }
+      if (!answer) answer = { ok: false, error: String(agentErr.text || "").trim().slice(-300) || "The agent gave no answer." }
+      root.agentAnswered(answer)
     }
   }
 
