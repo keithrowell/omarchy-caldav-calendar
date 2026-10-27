@@ -217,10 +217,22 @@ Panel {
       : Model.viewRange(selectedKey, viewMode, weekStart, daySpan)
   }
 
+  // Whenever the days on screen change (clicking a day in 3-day or week
+  // view, the agent moving the selection), load that range. Only the arrows
+  // and view buttons used to, so a newly shown day could come up empty.
+  property string loadedRangeKey: ""
+  onSelectedKeyChanged: Qt.callLater(refreshIfRangeChanged)
+  function refreshIfRangeChanged() {
+    if (!root.active) return
+    var range = activeRange()
+    if (range.start + "|" + range.end !== loadedRangeKey) refresh()
+  }
+
   function refresh(forceSync) {
     root.today = new Date()
     if (!root.selectedKey) root.selectedKey = root.todayKey
     var range = activeRange()
+    loadedRangeKey = range.start + "|" + range.end
     if (calendarService) calendarService.snapshot(range.start, range.end, provider, forceSync === true)
   }
 
