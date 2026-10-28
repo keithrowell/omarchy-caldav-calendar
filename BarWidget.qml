@@ -71,6 +71,13 @@ BarWidget {
     windowLoader.setSource(Qt.resolvedUrl("Panel.qml"), { windowMode: true })
   }
 
+  function openSettings() {
+    openWindow()
+    var show = function() { if (windowLoader.item && !windowLoader.item.showingSettings) windowLoader.item.startSettings() }
+    if (windowLoader.item) show()
+    else windowLoader.loaded.connect(show)
+  }
+
   function closeWindow() { if (windowLoader.item) windowLoader.item.close() }
   function toggleWindow() {
     if (windowLoader.item && windowLoader.item.windowShown) closeWindow()
@@ -115,6 +122,7 @@ BarWidget {
     target: "omarchy.clock"
 
     function openWindow(): void { root.openWindow() }
+    function openSettings(): void { root.openSettings() }
     function closeWindow(): void { root.closeWindow() }
     function toggleWindow(): void { root.toggleWindow() }
     function refresh(): void { root.broadcast("refresh") }

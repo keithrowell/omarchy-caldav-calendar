@@ -711,9 +711,10 @@ Item {
     updateProc.running = true
   }
 
-  function applyCalendarAppearance(names, colors) {
+  function applyCalendarAppearance(names, colors, syncs) {
     names = names || {}
     colors = colors || {}
+    syncs = syncs || {}
     var nextCalendars = []
     for (var i = 0; i < cachedCalendars.length; i++) {
       var calendar = cachedCalendars[i]
@@ -724,7 +725,8 @@ Item {
         provider: calendar.provider,
         host: calendar.host || "",
         source: calendar.source,
-        readonly: calendar.readonly
+        readonly: calendar.readonly,
+        syncMinutes: calendar.syncMinutes === null || calendar.syncMinutes === undefined ? calendar.syncMinutes : (syncs[calendar.id] || calendar.syncMinutes)
       })
     }
     var nextEvents = []
@@ -856,8 +858,8 @@ Item {
     agentBusy = false
   }
 
-  function updateCalendars(entries, names, colors) {
-    applyCalendarAppearance(names, colors)
+  function updateCalendars(entries, names, colors, syncs) {
+    applyCalendarAppearance(names, colors, syncs)
     if (calendarsProc.running) calendarsProc.running = false
     calendarsProc.secret = JSON.stringify({ calendars: entries || [] })
     calendarsProc.command = [helperPath(), "update-calendars", "--provider", provider]

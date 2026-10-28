@@ -457,6 +457,44 @@ def source_webdav_url(source, modules: EdsModules) -> str:
     return result + (f"?{query}" if query else "")
 
 
+# How often Evolution Data Server pulls a calendar from its server, in
+# minutes. Local calendars have nothing to pull, so they report None. A source
+# without a Refresh section uses EDS's own default of an hour.
+SYNC_MINUTES_DEFAULT = 60
+SYNC_MINUTES_MAX = 24 * 60
+LOCAL_BACKENDS = ("local", "contacts")
+
+
+def source_syncs_remotely(source, modules: EdsModules) -> bool:
+    eds = modules.EDataServer
+    if not source.has_extension(eds.SOURCE_EXTENSION_CALENDAR):
+        return False
+    backend = source.get_extension(eds.SOURCE_EXTENSION_CALENDAR).get_backend_name() or ""
+    return backend not in LOCAL_BACKENDS
+
+
+def source_sync_minutes(source, modules: EdsModules):
+    if not source_syncs_remotely(source, modules):
+        return None
+    eds = modules.EDataServer
+    if not source.has_extension(eds.SOURCE_EXTENSION_REFRESH):
+        return SYNC_MINUTES_DEFAULT
+    refresh = source.get_extension(eds.SOURCE_EXTENSION_REFRESH)
+    if not refresh.get_enabled():
+        return 0
+    return int(refresh.get_interval_minutes() or SYNC_MINUTES_DEFAULT)
+
+
+def sync_minutes_value(value):
+    try:
+        minutes = int(value)
+    except (TypeError, ValueError):
+        return None
+    if minutes < 1 or minutes > SYNC_MINUTES_MAX:
+        return None
+    return minutes
+
+
 def source_calendar(source, registry, modules: EdsModules) -> dict:
     color = ""
     if source.has_extension(modules.EDataServer.SOURCE_EXTENSION_CALENDAR):
@@ -470,6 +508,7 @@ def source_calendar(source, registry, modules: EdsModules) -> dict:
         "host": source_host(source, modules),
         "source": "Evolution Data Server",
         "readonly": None,
+        "syncMinutes": source_sync_minutes(source, modules),
     }
 
 
@@ -3495,10 +3534,13 @@ def apply_calendar_overrides_to_cache(updates: list) -> None:
                 continue
             name = str(item.get("name") or "").strip()
             color = str(item.get("color") or "").strip()
+            minutes = sync_minutes_value(item.get("syncMinutes"))
             if name:
                 calendar["name"] = name
             if color:
                 calendar["color"] = color
+            if minutes and calendar.get("syncMinutes") is not None:
+                calendar["syncMinutes"] = minutes
         for event in cache.get("events") or []:
             item = by_id.get(str(event.get("calendarId") or ""))
             if not item:
@@ -3518,19 +3560,37 @@ def eds_update_calendars(items: list) -> dict:
     updated = []
     for item in items or []:
         calendar_id = str((item or {}).get("id") or "").strip()
-        if not calendar_id or not is_omarchy_source_uid(calendar_id):
+        if not calendar_id:
+            continue
+        # Name and colour only change on calendars this plugin added. The sync
+        # interval can change on any calendar that pulls from a server,
+        # including ones Evolution's own accounts added (Google, for one).
+        owned = is_omarchy_source_uid(calendar_id)
+        minutes = sync_minutes_value(item.get("syncMinutes"))
+        if not owned and minutes is None:
             continue
         source = registry.ref_source(calendar_id)
         if source is None:
             continue
-        name = str(item.get("name") or "").strip()
-        color = str(item.get("color") or "").strip()
-        if name:
-            source.set_display_name(name)
-        if color.startswith("#") and source.has_extension(modules.EDataServer.SOURCE_EXTENSION_CALENDAR):
-            source.get_extension(modules.EDataServer.SOURCE_EXTENSION_CALENDAR).set_color(color)
-            if source.has_extension(modules.EDataServer.SOURCE_EXTENSION_WEBDAV_BACKEND):
-                source.get_extension(modules.EDataServer.SOURCE_EXTENSION_WEBDAV_BACKEND).set_color(color)
+        changed = False
+        if owned:
+            name = str(item.get("name") or "").strip()
+            color = str(item.get("color") or "").strip()
+            if name:
+                source.set_display_name(name)
+                changed = True
+            if color.startswith("#") and source.has_extension(modules.EDataServer.SOURCE_EXTENSION_CALENDAR):
+                source.get_extension(modules.EDataServer.SOURCE_EXTENSION_CALENDAR).set_color(color)
+                if source.has_extension(modules.EDataServer.SOURCE_EXTENSION_WEBDAV_BACKEND):
+                    source.get_extension(modules.EDataServer.SOURCE_EXTENSION_WEBDAV_BACKEND).set_color(color)
+                changed = True
+        if minutes is not None and source_syncs_remotely(source, modules) and source_sync_minutes(source, modules) != minutes:
+            refresh = source.get_extension(modules.EDataServer.SOURCE_EXTENSION_REFRESH)
+            refresh.set_enabled(True)
+            refresh.set_interval_minutes(minutes)
+            changed = True
+        if not changed:
+            continue
         if not registry.commit_source_sync(source, None):
             raise ValueError(f"Failed to update calendar: {source.get_display_name()}")
         updated.append(source_calendar(source, registry, modules))

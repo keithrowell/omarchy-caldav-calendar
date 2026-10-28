@@ -64,6 +64,7 @@ Panel {
   property string draftReminderMinutes: "10"
   property var draftCalendarNames: ({})
   property var draftCalendarColors: ({})
+  property var draftCalendarSync: ({})
   property var draftHiddenCalendars: ({})
   property var removeCandidate: null
   property string createTab: "form"
@@ -444,7 +445,7 @@ Panel {
     })
     if (calendarService) {
       calendarService.setReminderMinutes(parseInt(draftReminderMinutes, 10), draftTimeFormat)
-      calendarService.updateCalendars(root.calendarAppearanceEntries(), draftCalendarNames, draftCalendarColors)
+      calendarService.updateCalendars(root.calendarAppearanceEntries(), draftCalendarNames, draftCalendarColors, draftCalendarSync)
     }
     appliedDefaultView = false
     showingSettings = false
@@ -466,6 +467,7 @@ Panel {
     draftReminderMinutes = String(reminderMinutes)
     draftCalendarNames = root.loadedCalendarNames()
     draftCalendarColors = root.loadedCalendarColors()
+    draftCalendarSync = ({})
     draftHiddenCalendars = Model.copyMap(hiddenCalendars)
   }
 
@@ -484,6 +486,7 @@ Panel {
     draftReminderMinutes = "10"
     draftCalendarNames = ({})
     draftCalendarColors = ({})
+    draftCalendarSync = ({})
     draftHiddenCalendars = ({})
     settingsError = ""
   }
@@ -544,6 +547,35 @@ Panel {
     var next = Model.copyMap(draftCalendarColors)
     next[calendarId] = color
     draftCalendarColors = next
+  }
+
+  function setDraftCalendarSync(calendarId, minutes) {
+    var next = Model.copyMap(draftCalendarSync)
+    next[calendarId] = minutes
+    draftCalendarSync = next
+  }
+
+  function calendarSyncMinutes(calendar) {
+    if (!calendar || calendar.syncMinutes === null || calendar.syncMinutes === undefined) return null
+    var draft = draftCalendarSync[calendar.id]
+    return draft ? draft : calendar.syncMinutes
+  }
+
+  // Evolution Data Server pulls each remote calendar on this interval, whether
+  // or not the calendar is open. An interval set elsewhere stays on the list.
+  function syncChoices(current) {
+    var result = [
+      { value: "5", label: "Every 5 min" },
+      { value: "10", label: "Every 10 min" },
+      { value: "15", label: "Every 15 min" },
+      { value: "30", label: "Every 30 min" },
+      { value: "60", label: "Every hour" },
+      { value: "240", label: "Every 4 hours" }
+    ]
+    var value = String(current || "")
+    if (value === "0") result.unshift({ value: "0", label: "Off" })
+    else if (value && !result.some(function(choice) { return choice.value === value })) result.push({ value: value, label: "Every " + value + " min" })
+    return result
   }
 
   function uniqueThemeColors() {
@@ -628,7 +660,8 @@ Panel {
       result.push({
         id: calendar.id,
         name: Model.calendarDisplayName(calendar, draftCalendarNames),
-        color: Model.calendarDisplayColor(calendar, draftCalendarColors, i)
+        color: Model.calendarDisplayColor(calendar, draftCalendarColors, i),
+        syncMinutes: draftCalendarSync[calendar.id] || null
       })
     }
     return result
@@ -3089,7 +3122,8 @@ Panel {
     }
   }
 
-  // Fixed columns so every row lines up: show/hide, colour, name, note, menu.
+  // Fixed columns so every row lines up: show/hide, colour, name, sync, note,
+  // menu. Local calendars have nothing to sync and leave that column empty.
   // Remove sits behind the menu and asks first, so it can't be hit by
   // misreading which row a button belongs to.
   component SettingsCalendarRow: Rectangle {
@@ -3105,6 +3139,7 @@ Panel {
     readonly property string currentColor: Model.calendarDisplayColor(calendar, root.draftCalendarColors, calendarIndex)
     readonly property bool removable: Model.canRemoveCalendar(calendar)
     readonly property bool shown: !Model.calendarHidden(root.draftHiddenCalendars, calendarId)
+    readonly property var syncMinutes: root.calendarSyncMinutes(calendar)
 
     MouseArea {
       id: rowMouse
@@ -3153,7 +3188,7 @@ Panel {
       id: nameField
       anchors.left: swatch.right
       anchors.leftMargin: Style.space(12)
-      anchors.right: noteText.left
+      anchors.right: syncDropdown.left
       anchors.rightMargin: Style.space(12)
       anchors.verticalCenter: parent.verticalCenter
       height: Style.spacing.controlHeight
@@ -3162,6 +3197,27 @@ Panel {
       text: settingsCalendarRow.currentName
       placeholderText: "Calendar name"
       onEditingFinished: root.setDraftCalendarName(settingsCalendarRow.calendarId, text)
+    }
+
+    Dropdown {
+      id: syncDropdown
+      objectName: "syncDropdown"
+      anchors.right: noteText.left
+      anchors.rightMargin: Style.space(8)
+      anchors.verticalCenter: parent.verticalCenter
+      width: Style.space(132)
+      height: Style.spacing.controlHeight
+      visible: settingsCalendarRow.syncMinutes !== null
+      opacity: settingsCalendarRow.shown ? 1 : 0.55
+      showLabel: false
+      value: String(settingsCalendarRow.syncMinutes)
+      options: root.syncChoices(settingsCalendarRow.syncMinutes)
+      foreground: Commons.Color.foreground
+      background: Commons.Color.popups.background
+      onChanged: function(value) {
+        var minutes = parseInt(value, 10)
+        if (minutes > 0) root.setDraftCalendarSync(settingsCalendarRow.calendarId, minutes)
+      }
     }
 
     Text {
