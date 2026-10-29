@@ -12,7 +12,7 @@ fi
 omarchy-shell omarchy.clock openDay "$day" >/dev/null
 
 # The first open builds the window, which takes a moment.
-for _ in $(seq 1 30); do
+for _ in $(seq 1 50); do
   if hyprctl clients -j | grep -q '"title": "Day overview"'; then
     hyprctl dispatch 'hl.dsp.focus({ window = "title:^Day overview$" })' >/dev/null 2>&1 || true
     exit 0

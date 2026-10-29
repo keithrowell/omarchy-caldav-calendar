@@ -86,7 +86,7 @@ SUMMARY_SYSTEM = f"""You read one day of the user's calendar and tell them what 
 
 {CONTEXT_RULES}
 
-Write a headline of one short sentence that sums the day up (how busy it is and what it hinges on). Then give up to four insights. Good insights are specific and useful: clashes between the user's own events, tight changeovers or travel between locations, long free stretches, something that needs preparing or bringing, when another column affects the user's plans (a pick-up time, a late finish), and how the day runs into the next morning. Skip anything obvious from the timeline itself and never pad: an empty list is fine. Use 24-hour times as given. Plain Australian English, no markdown."""
+Write a headline of one short sentence that sums the day up (how busy it is and what it hinges on). Then give up to four insights. Good insights are specific and useful: clashes between the user's own events, tight changeovers or travel between locations, long free stretches, something that needs preparing or bringing, when another column affects the user's plans (a pick-up time, a late finish), and how the day runs into the next morning. Skip anything obvious from the timeline itself and never pad: an empty list is fine. Plain Australian English, no markdown."""
 
 CHAT_SYSTEM = f"""You are the assistant inside the user's desktop calendar, looking at one day with them. You answer questions about their calendar and make changes they ask for.
 
@@ -223,6 +223,12 @@ def prune(folder: Path, today: date):
             continue
 
 
+def clock_rule(request) -> str:
+    if request.get("timeFormat") == "24h":
+        return "\nWrite times in 24-hour form, e.g. 17:30."
+    return "\nWrite times in 12-hour form, e.g. 5:30 pm."
+
+
 def summary(request, cache, ask, folder: Path) -> dict:
     day = date.fromisoformat(str(request.get("date") or date.today().isoformat()))
     hidden = request.get("hidden") or {}
@@ -239,7 +245,7 @@ def summary(request, cache, ask, folder: Path) -> dict:
         except (OSError, json.JSONDecodeError):
             pass
     names = calendar_names(cache, request)
-    answer = ask(SUMMARY_SYSTEM, SUMMARY_SCHEMA, summary_prompt(day, events, columns, names, cache, hidden))
+    answer = ask(SUMMARY_SYSTEM + clock_rule(request), SUMMARY_SCHEMA, summary_prompt(day, events, columns, names, cache, hidden))
     headline = " ".join(str(answer.get("headline") or "").split())
     insights = [" ".join(str(item).split()) for item in (answer.get("insights") or []) if str(item).strip()][:MAX_INSIGHTS]
     folder.mkdir(parents=True, exist_ok=True)
@@ -395,7 +401,7 @@ def chat(request, cache, ask) -> dict:
     writable = writable_calendars(cache, hidden)
     default_id = request.get("defaultCalendarId") if request.get("defaultCalendarId") in writable else next(iter(writable), "")
     refs, _events = references(cache, day, hidden)
-    answer = ask(CHAT_SYSTEM, CHAT_SCHEMA, chat_prompt(request, cache, day, refs, writable, default_id, names))
+    answer = ask(CHAT_SYSTEM + clock_rule(request), CHAT_SCHEMA, chat_prompt(request, cache, day, refs, writable, default_id, names))
     actions, rejected = validate(answer.get("actions"), refs, writable, default_id)
     return {"ok": True, "mode": "chat", "date": day.isoformat(), "reply": str(answer.get("reply") or "").strip(),
             "actions": actions, "rejected": rejected}

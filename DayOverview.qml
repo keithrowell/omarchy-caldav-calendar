@@ -183,7 +183,7 @@ Item {
     summaryRequestId = "summary-" + Date.now()
     calendarService.cancelDayAgent("summary")
     calendarService.askDayAgent({
-      requestId: summaryRequestId, mode: "summary", date: dayKey, columns: columns, hidden: overviewHidden,
+      requestId: summaryRequestId, mode: "summary", date: dayKey, columns: columns, hidden: overviewHidden, timeFormat: timeFormat,
       names: calendarNames, force: force === true
     })
   }
@@ -200,7 +200,7 @@ Item {
     agentWaiting = true
     calendarService.askDayAgent({
       mode: "chat", date: dayKey, prompt: prompt, history: history, columns: columns,
-      hidden: overviewHidden, names: calendarNames, defaultCalendarId: String(setting("defaultCalendarId", ""))
+      hidden: overviewHidden, names: calendarNames, defaultCalendarId: String(setting("defaultCalendarId", "")), timeFormat: timeFormat
     })
   }
 
@@ -309,6 +309,12 @@ Item {
     undoing = false
   }
 
+  function undoLast() {
+    for (var i = turns.length - 1; i >= 0; i--) {
+      if ((turns[i].undo || []).length && !turns[i].undone) { undoTurn(i); return }
+    }
+  }
+
   function undoTurn(index) {
     var turn = turns[index]
     if (!turn || !turn.undo || !turn.undo.length || turn.undone || applyingTurn >= 0) return
@@ -377,6 +383,7 @@ Item {
         else if (event.key === Qt.Key_Right) { root.stepDay(1); event.accepted = true }
         else if (event.key === Qt.Key_T) { root.dayKey = root.todayKey; event.accepted = true }
         else if (event.key === Qt.Key_A) { root.agentOpen = !root.agentOpen; event.accepted = true }
+        else if (event.key === Qt.Key_Z && (event.modifiers & Qt.ControlModifier)) { root.undoLast(); event.accepted = true }
         else if (event.key === Qt.Key_Slash) { root.agentOpen = true; agentInput.forceActiveFocus(); event.accepted = true }
       }
 
@@ -854,6 +861,9 @@ Item {
             enabled: !root.agentWaiting && root.applyingTurn < 0
             onAccepted: sendButton.clicked()
             Keys.onEscapePressed: body.forceActiveFocus()
+            Keys.onPressed: function(event) {
+              if (event.key === Qt.Key_Z && (event.modifiers & Qt.ControlModifier) && text === "") { root.undoLast(); event.accepted = true }
+            }
           }
           Button {
             id: sendButton

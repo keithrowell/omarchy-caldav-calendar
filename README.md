@@ -29,11 +29,39 @@ The plugin needs Evolution Data Server. If it is not installed, the clock opens 
 - Show or hide each calendar from the calendar button in the header, or by account in settings. Hidden calendars keep syncing but give no reminders.
 - Pick any calendar colour with a colour picker (hue strip and saturation/brightness square), from presets, from the current Omarchy theme, or by hex value
 - Ask your agent to add an event in plain words ("tennis next Thursday"). It uses the agent set with `omarchy default agent` (Claude or Codex), reads your calendars and the last three months of habits, avoids clashes with your own commitments, and fills in the new-event form for you to check and save
+- A day overview window with columns you set, an AI summary of the day and an agent that changes events, with undo (see Day overview below)
 - Open the calendar in its own window that tiles like any other app: the window button in the header, `scripts/calendar-window`, or `omarchy-shell omarchy.clock openWindow`
 
 <p align="center">
   <img src="screenshots/week.png" alt="Week view" width="480">
 </p>
+
+## Day overview
+
+One day in its own window, with your events split into columns you name, a short reading of the day from your agent, and an agent panel that can change your calendar.
+
+Open it from the day overview button in the calendar header, or run:
+
+```bash
+scripts/calendar-day            # today
+scripts/calendar-day tomorrow   # or friday, or 2026-11-03
+omarchy-shell omarchy.clock openDay 2026-11-03
+```
+
+Set up columns in settings under **Day overview**: name each column and tick its calendars. Calendars in no column go in the first one. A calendar you put in a column shows there even when it is hidden in the other views, which suits a child's school timetable you want beside your own day but not in your week.
+
+| Key | Action |
+| --- | --- |
+| ← → | Previous or next day |
+| T | Today |
+| / | Ask the agent |
+| Ctrl+Z | Undo the agent's last change |
+| A | Show or hide the summary and agent |
+| Esc | Close |
+
+The summary and the agent use the agent set with `omarchy default agent` (Claude or Codex), with no tools. A summary is kept per day and made again only when that day's events change. The agent's changes are saved straight away and each reply has an Undo button. It can't delete a repeating event or change read-only calendars.
+
+To float the window in Hyprland, add a window rule for class `org.quickshell` with title `Day overview`.
 
 ## Add iCloud
 

@@ -20,7 +20,9 @@ Out of scope: week overviews, attendee handling, editing recurring series from t
 | Calendar header | a "Day overview" button that opens the selected day |
 | Launcher | `omarchy-calendar-day.desktop` |
 
-With no date given, the window opens on today. If it is already open, it moves to the requested day and comes forward.
+With no date given, the window opens on today. If it is already open, it moves to the requested day and comes forward. Opening a day asks the service for a sync, at most every two minutes: of its current range when that covers the day, otherwise of the month grid around the day.
+
+On io, a Hyprland rule in `~/.config/hypr/hyprland.lua` floats and centres the window. The plugin itself sets no rule.
 
 ## Window
 
@@ -32,17 +34,18 @@ Keys:
 |---|---|
 | Left, Right | previous or next day |
 | T | today |
-| A | show or hide the agent panel |
+| A | show or hide the summary and agent panel |
+| / | focus the agent input |
+| Ctrl+Z | undo the agent's most recent change |
 | Esc | close |
 
 The layout from top to bottom:
 
 1. The header holds the date, previous, today and next buttons, and a status line. On today the status is the next or current event in the first column with a countdown. On other days it is the number of timed events.
-2. The summary card holds the AI headline and insights. While a new summary is being made it says "Reading your day".
-3. The all-day row holds chips for all-day events and timed events that cover the whole day, each tinted with its calendar colour.
-4. The timeline has a time gutter and one column per configured column. Overlapping events in a column sit side by side. On today a now line crosses every column. The visible hours follow the existing "Hours on screen" setting, widened to take in every event that day, and the timeline scrolls.
+2. The all-day row holds chips for all-day events and timed events that cover the whole day, each tinted with its calendar colour.
+3. The timeline has a time gutter and one column per configured column. Overlapping events in a column sit side by side. On today a now line crosses every column. The visible hours follow the existing "Hours on screen" setting, widened to take in every event that day, and the timeline scrolls.
 
-The agent panel sits on the right at 360 pixels wide and collapses to nothing.
+The side panel sits on the right at 360 pixels wide and collapses to nothing. Its top holds the summary card (the AI headline and insights, scrolling past 45% of the panel's height, "Reading your day" while a summary is being made). The agent chat fills the rest.
 
 Event blocks use the calendar's display colour from `Model.calendarDisplayColor`, with the user's colour overrides, at the same fill strength as the week view. They carry no accent bar. Clicking an event opens it in the calendar window's edit form.
 
@@ -57,7 +60,7 @@ A new widget setting, `dayColumns`, holds an ordered list:
 
 Rules, implemented as `Model.dayColumns(calendars, setting, hidden)`:
 
-- Hidden calendars are left out everywhere.
+- A calendar named in a column shows there even when it is hidden in the calendar views. Hidden calendars in no column stay out.
 - A calendar listed in several columns appears in the first one only.
 - Visible calendars in no column join the first column.
 - With no setting, or an empty list, there is one column named "Events".
@@ -93,7 +96,7 @@ Chat request:
 { "mode": "chat", "date": "2026-10-29", "prompt": "...", "history": [...], "columns": [...], "hidden": {...}, "names": {...}, "defaultCalendarId": "..." }
 ```
 
-The prompt gives the agent today's date, the writable calendars, the columns, and every visible event from 14 days before to 14 days after the day on screen. Each event has a short reference (`e1`, `e2`, ...). The agent never sees raw event ids. The helper maps references back to event ids.
+The prompt gives the agent today's date, the writable calendars, the columns, and every visible event from 14 days before to 14 days after the day on screen. The request carries the calendar's time format, and both prompts tell the agent to write times in it. Each event has a short reference (`e1`, `e2`, ...). The agent never sees raw event ids. The helper maps references back to event ids.
 
 Chat answer:
 
