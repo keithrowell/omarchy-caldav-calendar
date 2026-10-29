@@ -55,6 +55,13 @@ Item {
   // conflicts, error}.
   signal agentAnswered(var answer)
   property bool agentBusy: false
+  // The day agent's answer to askDayAgent(), carrying the request's mode
+  // ("summary" or "chat") and date. Requests wait their turn in a queue.
+  signal dayAgentAnswered(var answer)
+  property var dayAgentQueue: []
+  property var dayAgentCurrent: null
+  readonly property bool dayAgentBusy: dayAgentCurrent !== null
+  signal eventDeleted(bool ok, string message)
 
   function helperPath() {
     return decodeURIComponent(Qt.resolvedUrl("helper/omarchy-calendar-helper").toString().replace(/^file:\/\//, ""))
@@ -858,6 +865,34 @@ Item {
     agentBusy = false
   }
 
+  function askDayAgent(request) {
+    var queue = (dayAgentQueue || []).slice()
+    queue.push(request || {})
+    dayAgentQueue = queue
+    runDayAgent()
+  }
+
+  function runDayAgent() {
+    if (dayAgentCurrent !== null || !(dayAgentQueue || []).length) return
+    var queue = dayAgentQueue.slice()
+    dayAgentCurrent = queue.shift()
+    dayAgentQueue = queue
+    dayAgentProc.secret = JSON.stringify(dayAgentCurrent)
+    dayAgentProc.stdinEnabled = true
+    dayAgentProc.command = [helperPath().replace(/omarchy-calendar-helper$/, "calendar-day-agent")]
+    dayAgentProc.running = true
+  }
+
+  // Drops queued requests of one mode ("summary" or "chat"), or all of them.
+  function cancelDayAgent(mode) {
+    dayAgentQueue = (dayAgentQueue || []).filter(function(request) { return mode && request.mode !== mode })
+    if (dayAgentCurrent && (!mode || dayAgentCurrent.mode === mode)) {
+      dayAgentCurrent = null
+      if (dayAgentProc.running) dayAgentProc.running = false
+      Qt.callLater(runDayAgent)
+    }
+  }
+
   function updateCalendars(entries, names, colors, syncs) {
     applyCalendarAppearance(names, colors, syncs)
     if (calendarsProc.running) calendarsProc.running = false
@@ -979,9 +1014,11 @@ Item {
         root.suppressedDeletes = []
         root.errorMessage = root.failMessage(payload, "Could not delete event.")
         root.status = "error"
+        root.eventDeleted(false, root.errorMessage)
         return
       }
       root.pendingDeleteEvents = []
+      root.eventDeleted(true, "")
       if (root.activeStart && root.activeEnd) root.startLiveSync(true)
     }
   }
@@ -1062,6 +1099,34 @@ Item {
       try { answer = JSON.parse(String(agentOut.text || "").trim() || "null") } catch (error) { answer = null }
       if (!answer) answer = { ok: false, error: String(agentErr.text || "").trim().slice(-300) || "The agent gave no answer." }
       root.agentAnswered(answer)
+    }
+  }
+
+  Process {
+    id: dayAgentProc
+    property string secret: ""
+    running: false
+    stdinEnabled: true
+    onStarted: {
+      write(secret + "\n")
+      secret = ""
+      stdinEnabled = false
+    }
+
+    stdout: StdioCollector { id: dayAgentOut; waitForEnd: true }
+    stderr: StdioCollector { id: dayAgentErr; waitForEnd: true }
+
+    onExited: function(exitCode) {
+      var request = root.dayAgentCurrent
+      if (request === null) return
+      root.dayAgentCurrent = null
+      var answer = null
+      try { answer = JSON.parse(String(dayAgentOut.text || "").trim() || "null") } catch (error) { answer = null }
+      if (!answer) answer = { ok: false, error: String(dayAgentErr.text || "").trim().slice(-300) || "The agent gave no answer." }
+      answer.mode = request.mode
+      answer.date = request.date
+      root.dayAgentAnswered(answer)
+      Qt.callLater(root.runDayAgent)
     }
   }
 
