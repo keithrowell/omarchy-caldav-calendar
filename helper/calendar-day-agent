@@ -1,0 +1,448 @@
+#!/usr/bin/env python3
+"""Summaries of a day and a chat agent that changes the calendar.
+
+Reads one JSON request on stdin and prints one JSON answer.
+
+Summary:
+
+  {"mode": "summary", "date": "YYYY-MM-DD", "columns": [{name, calendarIds}],
+   "hidden": {calendarId: true}, "names": {calendarId: name}, "force": false}
+  -> {"ok": true, "mode": "summary", "date": ..., "cached": bool,
+      "headline": "...", "insights": ["..."]}
+
+Summaries are cached per day with a hash of that day's events, so asking
+again for an unchanged day costs a file read and no agent call.
+
+Chat:
+
+  {"mode": "chat", "date": ..., "prompt": "...", "history": [{role, text}],
+   "columns": [...], "hidden": {...}, "names": {...}, "defaultCalendarId": "..."}
+  -> {"ok": true, "mode": "chat", "date": ..., "reply": "...",
+      "actions": [{op, eventId?, calendarId, title, start, end, allDay, location}],
+      "rejected": ["..."]}
+
+The agent sees events by short references (e1, e2, ...) and never raw ids.
+Actions it proposes are checked here: read-only or hidden calendars, unknown
+references, deleting one occurrence of a repeating event and unparseable
+times are rejected. The calendar window applies the rest and can undo them.
+The agent runs with no tools and no access beyond the prompt.
+"""
+
+import hashlib
+import json
+import os
+import subprocess
+import sys
+import tempfile
+from datetime import date, datetime, time, timedelta, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import agent_runner  # noqa: E402
+
+CHAT_WINDOW_DAYS = 14
+MAX_INSIGHTS = 4
+MAX_CHAT_EVENTS = 600
+SUMMARY_KEEP_DAYS = 30
+
+SUMMARY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "headline": {"type": "string", "description": "One short sentence that sums up the day for the user."},
+        "insights": {"type": "array", "items": {"type": "string"}, "maxItems": MAX_INSIGHTS,
+                     "description": "Up to four short, specific observations worth acting on. Empty when there is nothing useful to say."},
+    },
+    "required": ["headline", "insights"],
+}
+
+ACTION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "op": {"type": "string", "enum": ["create", "update", "delete"]},
+        "ref": {"type": "string", "description": "For update and delete: the event's reference, e.g. e3. Empty for create."},
+        "calendarId": {"type": "string", "description": "For create: a writable calendar id. For update: a calendar id to move the event to, or empty to keep it."},
+        "title": {"type": "string", "description": "Empty on update keeps the current title."},
+        "date": {"type": "string", "description": "YYYY-MM-DD. Empty on update keeps the current date."},
+        "start": {"type": "string", "description": "HH:MM 24-hour local time. Empty when allDay, or on update to keep the current time."},
+        "end": {"type": "string", "description": "HH:MM 24-hour local time. Empty when allDay, or on update to keep the current time."},
+        "allDay": {"type": "boolean"},
+        "location": {"type": "string", "description": "Empty on update keeps the current location."},
+    },
+    "required": ["op", "ref", "calendarId", "title", "date", "start", "end", "allDay", "location"],
+}
+
+CHAT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "reply": {"type": "string", "description": "A short answer for the user in plain words. Name dates in words and say what you changed."},
+        "actions": {"type": "array", "items": ACTION_SCHEMA, "description": "Calendar changes to make now. Empty when the user only asked a question."},
+    },
+    "required": ["reply", "actions"],
+}
+
+CONTEXT_RULES = """The user's calendars are grouped into columns they named themselves. The first column holds the user's own commitments unless its name says otherwise. Other columns usually track other people or things (a child's school timetable, a partner's roster, sport, birthdays, reminders): treat them as context, such as who needs dropping off or picking up and when someone is away, never as the user's own appointments. All-day entries are context unless they mean the user is away."""
+
+SUMMARY_SYSTEM = f"""You read one day of the user's calendar and tell them what matters about it, the way a sharp personal assistant would over coffee.
+
+{CONTEXT_RULES}
+
+Write a headline of one short sentence that sums the day up (how busy it is and what it hinges on). Then give up to four insights. Good insights are specific and useful: clashes between the user's own events, tight changeovers or travel between locations, long free stretches, something that needs preparing or bringing, when another column affects the user's plans (a pick-up time, a late finish), and how the day runs into the next morning. Skip anything obvious from the timeline itself and never pad: an empty list is fine. Use 24-hour times as given. Plain Australian English, no markdown."""
+
+CHAT_SYSTEM = f"""You are the assistant inside the user's desktop calendar, looking at one day with them. You answer questions about their calendar and make changes they ask for.
+
+{CONTEXT_RULES}
+
+Making changes:
+- Return each change in actions. They are applied as soon as you answer, and the user can undo them, so only include changes the user asked for or clearly agreed to. When a request is ambiguous, ask in reply and return no actions.
+- Refer to existing events only by their reference (e1, e2, ...). Use update to move, retitle, relocate or change the calendar of one event, and delete to remove one.
+- Events marked (read-only) can't be changed. Events marked (repeats) can be moved or edited one occurrence at a time but not deleted; say so if asked.
+- New events go in the default calendar unless the request or the user's habits point at another writable calendar.
+- Check for clashes with the user's own events before placing something and say what you avoided or couldn't avoid.
+- Work out dates from today's date and name them in words in your reply, e.g. "Friday 30 October".
+
+Keep reply to one to three short sentences in plain Australian English, no lists or markdown."""
+
+
+def store_dir() -> Path:
+    override = os.environ.get("OMARCHY_CALENDAR_SUMMARIES")
+    return Path(override) if override else Path.home() / ".local/share/omarchy-calendar/day-summaries"
+
+
+def cache_path() -> Path:
+    override = os.environ.get("OMARCHY_CALENDAR_CACHE")
+    return (Path(override) if override else Path.home() / ".local/share/omarchy-calendar") / "cache.json"
+
+
+def local(iso: str):
+    if not iso:
+        return None
+    try:
+        moment = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if moment.tzinfo is None:
+        return moment
+    return moment.astimezone().replace(tzinfo=None)
+
+
+def span(event):
+    """Local start and end of an event as naive datetimes."""
+    if event.get("allDay"):
+        try:
+            first = date.fromisoformat(str(event.get("start", ""))[:10])
+            last = date.fromisoformat(str(event.get("end", ""))[:10]) if event.get("end") else first + timedelta(days=1)
+        except ValueError:
+            return None, None
+        if last <= first:
+            last = first + timedelta(days=1)
+        return datetime.combine(first, time()), datetime.combine(last, time())
+    start, end = local(event.get("start", "")), local(event.get("end", ""))
+    if start and (not end or end <= start):
+        end = start + timedelta(minutes=30)
+    return start, end
+
+
+def overlaps(event, first: datetime, last: datetime) -> bool:
+    start, end = span(event)
+    return bool(start and end and start < last and end > first)
+
+
+def visible_events(cache, hidden):
+    return [e for e in cache.get("events", []) if e.get("calendarId") and not hidden.get(e.get("calendarId"))]
+
+
+def day_events(cache, day: date, hidden) -> list:
+    first = datetime.combine(day, time())
+    found = [e for e in visible_events(cache, hidden) if overlaps(e, first, first + timedelta(days=1))]
+    found.sort(key=lambda e: (span(e)[0], str(e.get("title") or "")))
+    return found
+
+
+def day_hash(events, columns) -> str:
+    fields = [[e.get("id"), e.get("title"), e.get("start"), e.get("end"), e.get("calendarId"), e.get("location"), bool(e.get("allDay"))] for e in events]
+    names = [[c.get("name"), c.get("calendarIds")] for c in columns or []]
+    return hashlib.sha256(json.dumps([fields, names], sort_keys=True).encode()).hexdigest()
+
+
+def calendar_names(cache, request) -> dict:
+    names = dict(request.get("names") or {})
+    for calendar in cache.get("calendars", []):
+        if calendar.get("id"):
+            names.setdefault(calendar["id"], calendar.get("name") or "Calendar")
+    return names
+
+
+def column_of(columns) -> dict:
+    found = {}
+    for column in columns or []:
+        for calendar_id in column.get("calendarIds") or []:
+            found.setdefault(calendar_id, column.get("name") or "Events")
+    return found
+
+
+def when(event, day: date | None = None) -> str:
+    start, end = span(event)
+    if not start:
+        return "?"
+    if event.get("allDay"):
+        last = end - timedelta(days=1)
+        return f"{start:%a %d %b} all day" if last.date() <= start.date() else f"{start:%a %d %b} to {last:%a %d %b} all day"
+    if day and start.date() <= day and end.date() > day and (start.date() < day or end.date() > day + timedelta(days=1)):
+        return f"{start:%a %d %b %H:%M} to {end:%a %d %b %H:%M}"
+    finish = f"{end:%H:%M}" if end.date() == start.date() else f"{end:%a %d %b %H:%M}"
+    return f"{start:%a %d %b %H:%M}-{finish}"
+
+
+def line(event, names, day=None) -> str:
+    title = " ".join(str(event.get("title") or "(no title)").split())
+    name = names.get(event.get("calendarId")) or event.get("calendarName") or "Calendar"
+    place = " ".join(str(event.get("location") or "").split())[:60]
+    return f"{when(event, day)}  {title}  [{name}]" + (f"  @ {place}" if place else "")
+
+
+def summary_prompt(day: date, events, columns, names, cache, hidden) -> str:
+    owners = column_of(columns)
+    blocks = []
+    for column in columns or [{"name": "Events", "calendarIds": []}]:
+        own = [e for e in events if owners.get(e.get("calendarId"), (columns or [{}])[0].get("name")) == column.get("name")]
+        body = "\n".join(line(e, names, day) for e in own) or "(nothing)"
+        blocks.append(f"{column.get('name')}:\n{body}")
+    tomorrow = day_events(cache, day + timedelta(days=1), hidden)
+    first_tomorrow = next((e for e in tomorrow if not e.get("allDay") and span(e)[0].date() == day + timedelta(days=1)), None)
+    now = datetime.now()
+    return (f"Now: {now:%A %d %B %Y %H:%M}.\nThe day: {day:%A %d %B %Y}.\n\n" + "\n\n".join(blocks)
+            + f"\n\nFirst event the next morning: {line(first_tomorrow, names) if first_tomorrow else '(none)'}\n")
+
+
+def prune(folder: Path, today: date):
+    for path in folder.glob("*.json"):
+        try:
+            if date.fromisoformat(path.stem) < today - timedelta(days=SUMMARY_KEEP_DAYS):
+                path.unlink()
+        except (ValueError, OSError):
+            continue
+
+
+def summary(request, cache, ask, folder: Path) -> dict:
+    day = date.fromisoformat(str(request.get("date") or date.today().isoformat()))
+    hidden = request.get("hidden") or {}
+    columns = request.get("columns") or []
+    events = day_events(cache, day, hidden)
+    digest = day_hash(events, columns)
+    path = folder / f"{day.isoformat()}.json"
+    if not request.get("force"):
+        try:
+            stored = json.loads(path.read_text())
+            if stored.get("hash") == digest:
+                return {"ok": True, "mode": "summary", "date": day.isoformat(), "cached": True,
+                        "headline": stored.get("headline", ""), "insights": stored.get("insights", [])}
+        except (OSError, json.JSONDecodeError):
+            pass
+    names = calendar_names(cache, request)
+    answer = ask(SUMMARY_SYSTEM, SUMMARY_SCHEMA, summary_prompt(day, events, columns, names, cache, hidden))
+    headline = " ".join(str(answer.get("headline") or "").split())
+    insights = [" ".join(str(item).split()) for item in (answer.get("insights") or []) if str(item).strip()][:MAX_INSIGHTS]
+    folder.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"hash": digest, "headline": headline, "insights": insights, "at": datetime.now().isoformat()}))
+    prune(folder, date.today())
+    return {"ok": True, "mode": "summary", "date": day.isoformat(), "cached": False, "headline": headline, "insights": insights}
+
+
+def writable_calendars(cache, hidden) -> dict:
+    return {c["id"]: c for c in cache.get("calendars", []) if c.get("id") and not c.get("readonly") and not hidden.get(c["id"])}
+
+
+def editable(event, writable) -> bool:
+    return event.get("calendarId") in writable and event.get("provider") != "webcal"
+
+
+def references(cache, day: date, hidden) -> tuple[dict, list]:
+    first = datetime.combine(day - timedelta(days=CHAT_WINDOW_DAYS), time())
+    last = datetime.combine(day + timedelta(days=CHAT_WINDOW_DAYS + 1), time())
+    events = [e for e in visible_events(cache, hidden) if overlaps(e, first, last)]
+    events.sort(key=lambda e: (span(e)[0], str(e.get("title") or "")))
+    events = events[:MAX_CHAT_EVENTS]
+    refs = {f"e{index + 1}": event for index, event in enumerate(events)}
+    return refs, events
+
+
+def chat_prompt(request, cache, day: date, refs, writable, default_id, names) -> str:
+    owners = column_of(request.get("columns"))
+    first_column = ((request.get("columns") or [{}])[0] or {}).get("name") or "Events"
+    lines = []
+    for ref, event in refs.items():
+        tags = []
+        if not editable(event, writable):
+            tags.append("read-only")
+        if event.get("recurring") or event.get("rid"):
+            tags.append("repeats")
+        column = owners.get(event.get("calendarId"), first_column)
+        lines.append(f"{ref}  {line(event, names)}  <{column}>" + (f"  ({', '.join(tags)})" if tags else ""))
+    column_lines = [f"{c.get('name')}: " + ", ".join(names.get(i, i) for i in c.get("calendarIds") or []) for c in request.get("columns") or []]
+    calendar_lines = [f"{cid}  {names.get(cid, 'Calendar')}" + ("  default" if cid == default_id else "") for cid in writable]
+    history = request.get("history") or []
+    conversation = "\n".join(f"{'User' if turn.get('role') == 'user' else 'You'}: {turn.get('text', '')}" for turn in history[-10:])
+    now = datetime.now()
+    return f"""Now: {now:%A %d %B %Y %H:%M} local time.
+Day on screen: {day:%A %d %B %Y}.
+
+Columns:
+{chr(10).join(column_lines) or '(one column)'}
+
+Writable calendars (id  name):
+{chr(10).join(calendar_lines) or '(none)'}
+
+Events from {day - timedelta(days=CHAT_WINDOW_DAYS):%d %b} to {day + timedelta(days=CHAT_WINDOW_DAYS):%d %b} (ref  when  title  [calendar]  <column>):
+{chr(10).join(lines) or '(nothing)'}
+
+{('Conversation so far:' + chr(10) + conversation + chr(10) + chr(10)) if conversation else ''}User: {str(request.get('prompt', '')).strip()}
+"""
+
+
+def parse_hhmm(text: str) -> time | None:
+    try:
+        hour, minute = (int(part) for part in str(text).strip().split(":"))
+    except ValueError:
+        return None
+    if hour == 24 and minute == 0:
+        return time(0, 0)
+    if not (0 <= hour < 24 and 0 <= minute < 60):
+        return None
+    return time(hour, minute)
+
+
+def utc_iso(moment: datetime) -> str:
+    return moment.astimezone().astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
+def times(day_text, start_text, end_text, all_day):
+    """Start and end in the form the calendar service takes, or None."""
+    try:
+        day = date.fromisoformat(str(day_text))
+    except ValueError:
+        return None
+    if all_day:
+        return day.isoformat(), (day + timedelta(days=1)).isoformat()
+    start, end = parse_hhmm(start_text), parse_hhmm(end_text)
+    if start is None or end is None:
+        return None
+    first = datetime.combine(day, start)
+    last = datetime.combine(day, end)
+    if last <= first:
+        last += timedelta(days=1)
+    return utc_iso(first), utc_iso(last)
+
+
+def validate(actions, refs, writable, default_id) -> tuple[list, list]:
+    accepted, rejected = [], []
+    for action in actions or []:
+        op = action.get("op")
+        title = " ".join(str(action.get("title") or "").split())
+        location = " ".join(str(action.get("location") or "").split())
+        if op == "create":
+            calendar_id = action.get("calendarId") or default_id
+            if calendar_id not in writable:
+                rejected.append(f"Couldn't add \"{title or 'event'}\": that calendar can't be changed.")
+                continue
+            when_ = times(action.get("date"), action.get("start"), action.get("end"), bool(action.get("allDay")))
+            if not when_:
+                rejected.append(f"Couldn't add \"{title or 'event'}\": the date or time didn't make sense.")
+                continue
+            accepted.append({"op": "create", "calendarId": calendar_id, "title": title or "(No title)", "start": when_[0], "end": when_[1],
+                             "allDay": bool(action.get("allDay")), "location": location})
+            continue
+        event = refs.get(str(action.get("ref") or "").strip())
+        if op not in ("update", "delete") or not event:
+            rejected.append(f"Skipped a change to an event I couldn't find ({action.get('ref') or 'no reference'}).")
+            continue
+        name = event.get("title") or "event"
+        if not editable(event, writable):
+            rejected.append(f"\"{name}\" is in a calendar that can't be changed.")
+            continue
+        if op == "delete":
+            if event.get("recurring") or event.get("rid"):
+                rejected.append(f"\"{name}\" repeats, so it can't be deleted from here. Delete it in the calendar.")
+                continue
+            accepted.append({"op": "delete", "eventId": event.get("id")})
+            continue
+        destination = action.get("calendarId") or event.get("calendarId")
+        if destination not in writable:
+            rejected.append(f"Couldn't move \"{name}\": that calendar can't be changed.")
+            continue
+        start, end = span(event)
+        all_day = bool(action.get("allDay"))
+        day_text = action.get("date") or start.date().isoformat()
+        start_text, end_text = action.get("start") or "", action.get("end") or ""
+        if not all_day and all_day == bool(event.get("allDay")):
+            # Times left empty keep the event's own; a new start alone keeps its length.
+            start_text = start_text or f"{start:%H:%M}"
+            if not end_text:
+                begin = parse_hhmm(start_text)
+                end_text = f"{datetime.combine(start.date(), begin) + (end - start):%H:%M}" if begin else ""
+        when_ = times(day_text, start_text, end_text, all_day)
+        if not when_:
+            rejected.append(f"Couldn't change \"{name}\": the date or time didn't make sense.")
+            continue
+        accepted.append({"op": "update", "eventId": event.get("id"), "calendarId": destination, "title": title or event.get("title") or "(No title)",
+                         "start": when_[0], "end": when_[1], "allDay": all_day, "location": location or event.get("location") or ""})
+    return accepted, rejected
+
+
+def chat(request, cache, ask) -> dict:
+    day = date.fromisoformat(str(request.get("date") or date.today().isoformat()))
+    hidden = request.get("hidden") or {}
+    names = calendar_names(cache, request)
+    writable = writable_calendars(cache, hidden)
+    default_id = request.get("defaultCalendarId") if request.get("defaultCalendarId") in writable else next(iter(writable), "")
+    refs, _events = references(cache, day, hidden)
+    answer = ask(CHAT_SYSTEM, CHAT_SCHEMA, chat_prompt(request, cache, day, refs, writable, default_id, names))
+    actions, rejected = validate(answer.get("actions"), refs, writable, default_id)
+    return {"ok": True, "mode": "chat", "date": day.isoformat(), "reply": str(answer.get("reply") or "").strip(),
+            "actions": actions, "rejected": rejected}
+
+
+def main() -> int:
+    try:
+        request = json.loads(sys.stdin.read() or "{}")
+    except json.JSONDecodeError:
+        print(json.dumps({"ok": False, "error": "Bad request."}))
+        return 0
+    mode = request.get("mode")
+    base = {"mode": mode, "date": request.get("date", "")}
+    if mode not in ("summary", "chat"):
+        print(json.dumps({**base, "ok": False, "error": "Unknown request."}))
+        return 0
+    if mode == "chat" and not str(request.get("prompt", "")).strip():
+        print(json.dumps({**base, "ok": False, "error": "Ask something about your calendar."}))
+        return 0
+    try:
+        date.fromisoformat(str(request.get("date") or date.today().isoformat()))
+    except ValueError:
+        print(json.dumps({**base, "ok": False, "error": "Bad date."}))
+        return 0
+
+    name = agent_runner.agent_name()
+    if name not in agent_runner.SUPPORTED:
+        print(json.dumps({**base, "ok": False, "error": agent_runner.unsupported_message(name)}))
+        return 0
+    try:
+        cache = json.loads(cache_path().read_text())
+    except (OSError, json.JSONDecodeError):
+        cache = {}
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="calendar-day-agent-") as workdir:
+            def ask(system, schema, prompt):
+                return agent_runner.run(name, system, schema, prompt, workdir)
+            answer = summary(request, cache, ask, store_dir()) if mode == "summary" else chat(request, cache, ask)
+    except subprocess.TimeoutExpired:
+        answer = {**base, "ok": False, "error": "The agent took too long to answer."}
+    except (RuntimeError, OSError, json.JSONDecodeError, ValueError) as error:
+        answer = {**base, "ok": False, "error": str(error)}
+    answer["agent"] = name
+    print(json.dumps(answer))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
