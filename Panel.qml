@@ -66,6 +66,7 @@ Panel {
   property var draftCalendarColors: ({})
   property var draftCalendarSync: ({})
   property var draftHiddenCalendars: ({})
+  property var draftDayColumns: []
   property var removeCandidate: null
   property string createTab: "form"
   property var agentTurns: []
@@ -441,7 +442,8 @@ Panel {
       reminderMinutes: parseInt(draftReminderMinutes, 10),
       calendarNames: draftCalendarNames,
       calendarColors: draftCalendarColors,
-      hiddenCalendars: draftHiddenCalendars
+      hiddenCalendars: draftHiddenCalendars,
+      dayColumns: draftDayColumns.filter(function(column) { return String(column.name || "").trim() !== "" })
     })
     if (calendarService) {
       calendarService.setReminderMinutes(parseInt(draftReminderMinutes, 10), draftTimeFormat)
@@ -469,6 +471,7 @@ Panel {
     draftCalendarColors = root.loadedCalendarColors()
     draftCalendarSync = ({})
     draftHiddenCalendars = Model.copyMap(hiddenCalendars)
+    draftDayColumns = JSON.parse(JSON.stringify(Array.isArray(setting("dayColumns", [])) ? setting("dayColumns", []) : []))
   }
 
   function restoreSettingsDefaults() {
@@ -488,6 +491,7 @@ Panel {
     draftCalendarColors = ({})
     draftCalendarSync = ({})
     draftHiddenCalendars = ({})
+    draftDayColumns = []
     settingsError = ""
   }
 
@@ -649,6 +653,46 @@ Panel {
       else delete next[id]
     }
     persistSettings({ hiddenCalendars: next })
+  }
+
+  // Day overview columns in the settings draft: [{name, calendars: [id]}].
+  function editDayColumns(change) {
+    var next = JSON.parse(JSON.stringify(draftDayColumns || []))
+    change(next)
+    draftDayColumns = next
+  }
+
+  function addDayColumn() {
+    editDayColumns(function(columns) { columns.push({ name: columns.length ? "Column " + (columns.length + 1) : "Me", calendars: [] }) })
+  }
+
+  function removeDayColumn(index) {
+    editDayColumns(function(columns) { columns.splice(index, 1) })
+  }
+
+  function moveDayColumn(index, delta) {
+    editDayColumns(function(columns) {
+      var target = index + delta
+      if (target < 0 || target >= columns.length) return
+      var moved = columns.splice(index, 1)[0]
+      columns.splice(target, 0, moved)
+    })
+  }
+
+  function renameDayColumn(index, name) {
+    if (!draftDayColumns[index] || draftDayColumns[index].name === name) return
+    editDayColumns(function(columns) { columns[index].name = String(name || "") })
+  }
+
+  // A calendar sits in one column: ticking it in one column takes it out of
+  // the others.
+  function toggleDayColumnCalendar(index, calendarId) {
+    editDayColumns(function(columns) {
+      var had = (columns[index].calendars || []).indexOf(calendarId) >= 0
+      for (var i = 0; i < columns.length; i++)
+        columns[i].calendars = (columns[i].calendars || []).filter(function(id) { return id !== calendarId })
+      if (!had) columns[index].calendars.push(calendarId)
+    })
   }
 
   function calendarAppearanceEntries() {
@@ -1173,7 +1217,7 @@ Panel {
           visible: !root.showingSettings && !root.compactEds
           width: parent.width
           readonly property real rowHeight: Math.max(viewControls.implicitHeight, titleColumn.implicitHeight, actionControls.implicitHeight, settingsTopButton.implicitHeight)
-          readonly property real rightWidth: actionControls.implicitWidth + calendarsMenuButton.width + dayPanelToggle.width + (windowButton.visible ? windowButton.width : 0) + settingsTopButton.width + Style.space(28)
+          readonly property real rightWidth: actionControls.implicitWidth + calendarsMenuButton.width + dayPanelToggle.width + (dayOverviewButton.visible ? dayOverviewButton.width + Style.space(4) : 0) + (windowButton.visible ? windowButton.width : 0) + settingsTopButton.width + Style.space(28)
           // A narrow window puts the title on its own row above the controls,
           // and a very narrow one gives the view buttons a row of their own.
           readonly property real sideRoom: (width - titleNav.width) / 2 - Style.space(12)
@@ -1281,7 +1325,7 @@ Panel {
           PanelActionButton {
             id: calendarsMenuButton
             visible: !root.showingSettings
-            anchors.right: dayPanelToggle.left
+            anchors.right: dayOverviewButton.visible ? dayOverviewButton.left : dayPanelToggle.left
             anchors.rightMargin: Style.space(4)
             anchors.verticalCenter: parent.verticalCenter
             anchors.verticalCenterOffset: headerBar.controlsOffset
@@ -1295,6 +1339,22 @@ Panel {
               objectName: "calendarsMenu"
               x: parent.width - width
               y: parent.height + Style.space(6)
+            }
+          }
+
+          PanelActionButton {
+            id: dayOverviewButton
+            visible: !root.showingSettings && !!root.hostWidget && typeof root.hostWidget.openDay === "function"
+            anchors.right: dayPanelToggle.left
+            anchors.rightMargin: Style.space(4)
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.verticalCenterOffset: headerBar.controlsOffset
+            iconText: "󰃭"
+            tooltipText: "Day overview"
+            onClicked: {
+              var key = root.selectedKey
+              if (!root.windowMode) root.close()
+              root.hostWidget.openDay(key)
             }
           }
 
@@ -2758,6 +2818,53 @@ Panel {
       }
 
       SettingsSection {
+        title: "Day overview"
+        Text {
+          width: parent.width
+          text: "Columns for the day overview, left to right. Calendars in no column go in the first one."
+          color: Commons.Color.muted
+          wrapMode: Text.WordWrap
+          font.family: root.bar ? root.bar.fontFamily : Style.font.family
+          font.pixelSize: Style.font.bodySmall
+        }
+        Repeater {
+          // A count, not the array, so editing a column keeps its row (and
+          // an open calendar picker) in place.
+          model: root.draftDayColumns.length
+          Row {
+            id: dayColumnRow
+            required property int index
+            readonly property var modelData: root.draftDayColumns[index] || ({ name: "", calendars: [] })
+            spacing: Style.space(6)
+            TextField {
+              width: Style.space(220)
+              text: dayColumnRow.modelData.name
+              placeholderText: "Column name"
+              onEditingFinished: root.renameDayColumn(dayColumnRow.index, text)
+            }
+            Button {
+              id: dayColumnCalendars
+              text: {
+                var count = (dayColumnRow.modelData.calendars || []).length
+                return count === 1 ? "1 calendar" : count + " calendars"
+              }
+              bordered: true
+              onClicked: dayColumnMenu.opened ? dayColumnMenu.close() : dayColumnMenu.open()
+              DayColumnMenu {
+                id: dayColumnMenu
+                columnIndex: dayColumnRow.index
+                y: parent.height + Style.space(6)
+              }
+            }
+            Button { text: "↑"; bordered: true; enabled: dayColumnRow.index > 0; tooltipText: "Move left"; onClicked: root.moveDayColumn(dayColumnRow.index, -1) }
+            Button { text: "↓"; bordered: true; enabled: dayColumnRow.index < root.draftDayColumns.length - 1; tooltipText: "Move right"; onClicked: root.moveDayColumn(dayColumnRow.index, 1) }
+            Button { text: "Remove"; bordered: true; onClicked: root.removeDayColumn(dayColumnRow.index) }
+          }
+        }
+        Button { text: "Add column"; bordered: true; onClicked: root.addDayColumn() }
+      }
+
+      SettingsSection {
         title: "Calendars"
         statusText: calendarService && calendarService.pendingRemoveId ? "Removing…" : (calendarService && calendarService.removeError ? calendarService.removeError : (calendarService && calendarService.syncing ? "Syncing" : ""))
         Text {
@@ -2946,6 +3053,114 @@ Panel {
       id: body
       width: parent.width
       spacing: Style.space(6)
+    }
+  }
+
+  // Settings: the calendars in one day overview column, ticked when in it.
+  // Edits the settings draft, so they apply on Save.
+  component DayColumnMenu: Popup {
+    id: dayColumnPopup
+    property int columnIndex: 0
+    readonly property var picked: (root.draftDayColumns[columnIndex] || {}).calendars || []
+    margins: Style.space(8)
+    padding: Style.space(10)
+    modal: false
+    dim: false
+    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+    width: Style.space(320)
+    height: Math.min(pickColumn.implicitHeight + padding * 2, Style.space(480))
+    background: Rectangle {
+      color: Commons.Color.popups.background
+      border.color: Commons.Color.accent
+      border.width: 1
+      radius: Style.cornerRadius
+    }
+    contentItem: Flickable {
+      contentWidth: width
+      contentHeight: pickColumn.implicitHeight
+      clip: true
+      boundsBehavior: Flickable.StopAtBounds
+
+      Column {
+        id: pickColumn
+        width: parent.width
+        spacing: Style.space(2)
+
+        Repeater {
+          model: calendarService && dayColumnPopup.opened ? Model.calendarGroups(calendarService.calendars, root.draftCalendarNames) : []
+          Column {
+            id: pickGroup
+            required property var modelData
+            width: pickColumn.width
+            spacing: Style.space(2)
+
+            Text {
+              height: Style.space(26)
+              verticalAlignment: Text.AlignVCenter
+              text: pickGroup.modelData.label
+              color: Commons.Color.accent
+              font.family: root.bar ? root.bar.fontFamily : Style.font.family
+              font.pixelSize: Style.font.bodySmall
+              font.bold: true
+            }
+
+            Repeater {
+              model: pickGroup.modelData.calendars
+              Rectangle {
+                id: pickRow
+                required property var modelData
+                readonly property bool inColumn: dayColumnPopup.picked.indexOf(modelData.calendar.id) >= 0
+                readonly property bool hidden: Model.calendarHidden(root.draftHiddenCalendars, modelData.calendar.id)
+                readonly property color swatch: Model.calendarDisplayColor(modelData.calendar, root.draftCalendarColors, modelData.index)
+                width: pickGroup.width
+                height: Style.space(28)
+                radius: Style.cornerRadius
+                color: pickMouse.containsMouse ? Util.alpha(Commons.Color.foreground, 0.08) : "transparent"
+
+                Rectangle {
+                  id: pickCheck
+                  anchors.left: parent.left
+                  anchors.leftMargin: Style.space(6)
+                  anchors.verticalCenter: parent.verticalCenter
+                  width: Style.space(16)
+                  height: Style.space(16)
+                  radius: Math.min(Style.cornerRadius, Style.space(4))
+                  color: pickRow.inColumn ? pickRow.swatch : "transparent"
+                  border.width: 2
+                  border.color: pickRow.swatch
+                  Text {
+                    anchors.centerIn: parent
+                    visible: pickRow.inColumn
+                    text: "✓"
+                    color: Model.colorLuminance(parent.color) > 0.55 ? "#000000" : "#ffffff"
+                    font.pixelSize: Style.font.caption
+                    font.bold: true
+                  }
+                }
+                Text {
+                  anchors.left: pickCheck.right
+                  anchors.leftMargin: Style.space(10)
+                  anchors.right: parent.right
+                  anchors.rightMargin: Style.space(6)
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: pickRow.modelData.name + (pickRow.hidden ? "  (hidden)" : "")
+                  elide: Text.ElideRight
+                  color: pickRow.hidden ? Commons.Color.muted : Commons.Color.foreground
+                  font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                  font.pixelSize: Style.font.bodySmall
+                }
+                MouseArea {
+                  id: pickMouse
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.toggleDayColumnCalendar(dayColumnPopup.columnIndex, pickRow.modelData.calendar.id)
+                }
+              }
+            }
+          }
+        }
+      }
     }
   }
 

@@ -398,15 +398,17 @@ function timelineHours(events, dayKey, defaultStart, defaultEnd) {
   return { start: start, end: end }
 }
 
-// Columns for the day overview. Hidden calendars are left out, a calendar
-// listed in two columns stays in the first, and visible calendars in no
-// column join the first column.
+// Columns for the day overview. A calendar named in a column shows there
+// even when it is hidden in the calendar views; a calendar named twice stays
+// in its first column. Visible calendars in no column join the first one.
 function dayColumns(calendars, setting, hidden) {
-  var visible = (calendars || []).filter(function(calendar) {
-    return calendar && calendar.id && !calendarHidden(hidden, calendar.id)
-  }).map(function(calendar) { return calendar.id })
   var known = {}
-  visible.forEach(function(id) { known[id] = true })
+  var visible = []
+  ;(calendars || []).forEach(function(calendar) {
+    if (!calendar || !calendar.id) return
+    known[calendar.id] = true
+    if (!calendarHidden(hidden, calendar.id)) visible.push(calendar.id)
+  })
   var placed = {}
   var columns = (Array.isArray(setting) ? setting : []).map(function(column) {
     var ids = ((column && column.calendars) || []).filter(function(id) {

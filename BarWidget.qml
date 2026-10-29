@@ -49,7 +49,7 @@ BarWidget {
   function closeForPopoutSwitch() { if (panelLoader.item) panelLoader.item.closeForPopoutSwitch() }
 
   function injectPanel() {
-    var targets = [panelLoader.item, windowLoader.item]
+    var targets = [panelLoader.item, windowLoader.item, dayLoader.item]
     for (var i = 0; i < targets.length; i++) {
       var target = targets[i]
       if (!target) continue
@@ -76,6 +76,25 @@ BarWidget {
     var show = function() { if (windowLoader.item && !windowLoader.item.showingSettings) windowLoader.item.startSettings() }
     if (windowLoader.item) show()
     else windowLoader.loaded.connect(show)
+  }
+
+  // The day overview is its own window, created the first time it is asked
+  // for. An empty or malformed date opens today.
+  function openDay(dateKey) {
+    var key = String(dateKey || "")
+    if (dayLoader.item) {
+      dayLoader.item.openDay(key)
+      return
+    }
+    dayLoader.pendingKey = key
+    dayLoader.active = true
+  }
+
+  function editEventInWindow(event) {
+    openWindow()
+    var edit = function() { if (windowLoader.item) windowLoader.item.startEditingEvent(event) }
+    if (windowLoader.item) edit()
+    else windowLoader.loaded.connect(edit)
   }
 
   function closeWindow() { if (windowLoader.item) windowLoader.item.close() }
@@ -118,11 +137,25 @@ BarWidget {
     }
   }
 
+  Loader {
+    id: dayLoader
+    property string pendingKey: ""
+    active: false
+    asynchronous: true
+    visible: false
+    source: active ? Qt.resolvedUrl("DayOverview.qml") : ""
+    onLoaded: {
+      root.injectPanel()
+      item.openDay(pendingKey)
+    }
+  }
+
   IpcHandler {
     target: "omarchy.clock"
 
     function openWindow(): void { root.openWindow() }
     function openSettings(): void { root.openSettings() }
+    function openDay(date: string): void { root.openDay(date) }
     function closeWindow(): void { root.closeWindow() }
     function toggleWindow(): void { root.toggleWindow() }
     function refresh(): void { root.broadcast("refresh") }

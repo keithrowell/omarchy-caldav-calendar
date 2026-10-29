@@ -884,13 +884,10 @@ Item {
   }
 
   // Drops queued requests of one mode ("summary" or "chat"), or all of them.
+  // A request already running finishes; callers tell answers apart by the
+  // id they put on the request, which comes back on the answer.
   function cancelDayAgent(mode) {
     dayAgentQueue = (dayAgentQueue || []).filter(function(request) { return mode && request.mode !== mode })
-    if (dayAgentCurrent && (!mode || dayAgentCurrent.mode === mode)) {
-      dayAgentCurrent = null
-      if (dayAgentProc.running) dayAgentProc.running = false
-      Qt.callLater(runDayAgent)
-    }
   }
 
   function updateCalendars(entries, names, colors, syncs) {
@@ -1125,6 +1122,7 @@ Item {
       if (!answer) answer = { ok: false, error: String(dayAgentErr.text || "").trim().slice(-300) || "The agent gave no answer." }
       answer.mode = request.mode
       answer.date = request.date
+      answer.requestId = request.requestId || ""
       root.dayAgentAnswered(answer)
       Qt.callLater(root.runDayAgent)
     }

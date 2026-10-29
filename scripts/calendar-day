@@ -1,0 +1,21 @@
+#!/bin/bash
+# Open the day overview on a date (YYYY-MM-DD, default today), or bring it
+# forward and move it to that date if it is already open.
+
+set -euo pipefail
+
+day="${1:-}"
+if [[ -n "$day" && ! "$day" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+  day="$(date -d "$day" +%F 2>/dev/null)" || { echo "usage: calendar-day [YYYY-MM-DD|tomorrow|friday]" >&2; exit 2; }
+fi
+
+omarchy-shell omarchy.clock openDay "$day" >/dev/null
+
+# The first open builds the window, which takes a moment.
+for _ in $(seq 1 30); do
+  if hyprctl clients -j | grep -q '"title": "Day overview"'; then
+    hyprctl dispatch 'hl.dsp.focus({ window = "title:^Day overview$" })' >/dev/null 2>&1 || true
+    exit 0
+  fi
+  sleep 0.2
+done
