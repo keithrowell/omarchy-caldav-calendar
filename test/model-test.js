@@ -370,3 +370,26 @@ assert.deepEqual(model.layoutTimedEvents(stayDays, '2026-08-21', 0, 24).map(segm
 assert.deepEqual(model.timelineHours(stayDays, '2026-08-20', 8, 18), { start: 8, end: 18 })
 
 console.log('ok - calendar model')
+
+{
+  const cals = [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'h' }]
+  const hidden = { h: true }
+  assert.deepEqual(model.dayColumns(cals, [], hidden), [{ name: 'Events', calendarIds: ['a', 'b', 'c'] }])
+  assert.deepEqual(model.dayColumns(cals, undefined, hidden), [{ name: 'Events', calendarIds: ['a', 'b', 'c'] }])
+  const cols = model.dayColumns(cals, [{ name: 'One', calendars: ['b', 'h'] }, { name: 'Two', calendars: ['c', 'b', 'gone'] }], hidden)
+  assert.deepEqual(cols, [{ name: 'One', calendarIds: ['b', 'a'] }, { name: 'Two', calendarIds: ['c'] }])
+  const day = '2026-08-20'
+  const evs = model.normalizeEvents([
+    { id: '1', calendarId: 'a', title: 'A', start: localIso(day, '09:00'), end: localIso(day, '10:00') },
+    { id: '2', calendarId: 'b', title: 'B', start: localIso(day, '09:30'), end: localIso(day, '10:30') },
+    { id: '3', calendarId: 'c', title: 'C', start: localIso(day, '09:00'), end: localIso(day, '10:00') },
+    { id: '4', calendarId: 'h', title: 'Hidden', start: localIso(day, '11:00'), end: localIso(day, '12:00') }
+  ])
+  const laid = model.dayColumnLayout(evs, day, cols, 0, 24)
+  assert.deepEqual(laid.map(col => col.name), ['One', 'Two'])
+  assert.equal(laid[0].segments.length, 2)
+  assert.equal(laid[0].segments[0].lanes, 2)
+  assert.equal(laid[1].segments.length, 1)
+  assert.equal(laid[1].segments[0].lanes, 1)
+  console.log('ok - day overview columns')
+}

@@ -398,6 +398,39 @@ function timelineHours(events, dayKey, defaultStart, defaultEnd) {
   return { start: start, end: end }
 }
 
+// Columns for the day overview. Hidden calendars are left out, a calendar
+// listed in two columns stays in the first, and visible calendars in no
+// column join the first column.
+function dayColumns(calendars, setting, hidden) {
+  var visible = (calendars || []).filter(function(calendar) {
+    return calendar && calendar.id && !calendarHidden(hidden, calendar.id)
+  }).map(function(calendar) { return calendar.id })
+  var known = {}
+  visible.forEach(function(id) { known[id] = true })
+  var placed = {}
+  var columns = (Array.isArray(setting) ? setting : []).map(function(column) {
+    var ids = ((column && column.calendars) || []).filter(function(id) {
+      if (!known[id] || placed[id]) return false
+      placed[id] = true
+      return true
+    })
+    return { name: String((column && column.name) || 'Events'), calendarIds: ids }
+  })
+  if (!columns.length) columns = [{ name: 'Events', calendarIds: [] }]
+  visible.forEach(function(id) { if (!placed[id]) columns[0].calendarIds.push(id) })
+  return columns
+}
+
+// Timed events laid out per day overview column, overlaps side by side.
+function dayColumnLayout(events, dayKey, columns, hourStart, hourEnd) {
+  return (columns || []).map(function(column) {
+    var ids = {}
+    column.calendarIds.forEach(function(id) { ids[id] = true })
+    var own = (events || []).filter(function(event) { return event && ids[event.calendarId] })
+    return { name: column.name, segments: layoutTimedEvents(own, dayKey, hourStart, hourEnd) }
+  })
+}
+
 function eventCountForDay(events, key) {
   return eventsForDay(events, key).length
 }
@@ -1218,6 +1251,8 @@ if (typeof module !== 'undefined') module.exports = {
   calendarGroups,
   coversWholeDay,
   timelineHours,
+  dayColumns,
+  dayColumnLayout,
   calendarHidden,
   hexColorInput,
   visibleEventsByDay,
