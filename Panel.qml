@@ -42,6 +42,10 @@ Panel {
   property string setupPassword: ""
   property string settingsError: ""
   property bool appliedDefaultView: false
+  // The date when the view was last closed, so open() can tell whether the
+  // day left on screen was today (see Model.openingDayKey).
+  property string todayKeyWhenLeft: ""
+  onWindowShownChanged: if (!windowShown) todayKeyWhenLeft = Model.keyForDate(new Date())
   property string createCalendarId: ""
   property string createStartTime: "09:00"
   property string createEndTime: "10:00"
@@ -134,6 +138,14 @@ Panel {
       appliedDefaultView = true
     }
     root.now = new Date()
+    root.today = new Date()
+    var openKey = Model.openingDayKey(root.selectedKey, root.todayKeyWhenLeft, root.todayKey, root.windowMode)
+    if (openKey !== root.selectedKey) {
+      var openDate = Model.dateFromKey(openKey, root.today)
+      root.viewYear = openDate.getFullYear()
+      root.viewMonth = openDate.getMonth()
+      root.selectedKey = openKey
+    }
     if (calendarService) calendarService.setReminderMinutes(root.reminderMinutes, root.timeFormat)
     refresh(!!(calendarService && calendarService.status !== "ready"))
     if (root.windowMode) {

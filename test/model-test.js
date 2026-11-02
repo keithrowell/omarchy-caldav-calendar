@@ -394,3 +394,14 @@ console.log('ok - calendar model')
   assert.equal(laid[1].segments[0].lanes, 1)
   console.log('ok - day overview columns')
 }
+
+{
+  // The bar popup always opens on today. The window keeps the day it was
+  // left on, unless that day was today, in which case it follows the date.
+  assert.equal(model.openingDayKey('2026-11-01', '2026-11-01', '2026-11-02', false), '2026-11-02')
+  assert.equal(model.openingDayKey('2026-11-09', '2026-11-01', '2026-11-02', false), '2026-11-02')
+  assert.equal(model.openingDayKey('2026-11-01', '2026-11-01', '2026-11-02', true), '2026-11-02')
+  assert.equal(model.openingDayKey('2026-11-09', '2026-11-01', '2026-11-02', true), '2026-11-09')
+  assert.equal(model.openingDayKey('', '', '2026-11-02', true), '2026-11-02')
+  console.log('ok - opening day')
+}

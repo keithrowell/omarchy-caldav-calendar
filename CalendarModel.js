@@ -1188,7 +1188,16 @@ function summarizeRecurrence(rec, startKey) {
   return text
 }
 
+// The day a calendar view shows when it opens. The bar popup always opens on
+// today. The window keeps the day it was left on, unless that day was today
+// when it was left, so a window left on today follows the date.
+function openingDayKey(selectedKey, todayKeyWhenLeft, todayKey, windowMode) {
+  if (!windowMode || !selectedKey || selectedKey === todayKeyWhenLeft) return todayKey
+  return selectedKey
+}
+
 if (typeof module !== 'undefined') module.exports = {
+  openingDayKey,
   calendarChoiceLabel,
   calendarDisplayColor,
   calendarDisplayName,
