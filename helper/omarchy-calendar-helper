@@ -48,11 +48,19 @@ CALDAV_MULTIGET_BATCH_SIZE = 64
 MAX_CALDAV_SYNC_PAGES = 128
 MAX_CALDAV_REQUESTS = MAX_EVENTS + 2 * MAX_CALDAV_SYNC_PAGES
 CALDAV_SYNC_SECONDS = 45.0
+# ECal.Client.connect_sync waits the whole wait_for_connected timeout even when the
+# backend is already online (3 Nov 2026, EDS on io: 1 s costs 1 s, 10 s costs 10 s;
+# 0 blocks indefinitely). EDS serves its local cache while connecting, so 1 s is enough.
+EDS_CONNECT_WAIT_SECONDS = 1
+# The panel kills a snapshot after 180 s, before it saves anything. No new calendar
+# starts after the budget, nothing runs past budget + grace, and what synced is saved.
+SNAPSHOT_BUDGET_SECONDS = 140.0
+SNAPSHOT_GRACE_SECONDS = 25.0
 MAX_CALENDARS = 200
 MAX_FIRED = 2000
 PRIVATE_DIR_MODE = 0o700
 PRIVATE_FILE_MODE = 0o600
-PRIVATE_CACHE_FILES = ("cache.json", "cache.lock", "cache.dirty.json", "reminders.json", "sync.log")
+PRIVATE_CACHE_FILES = ("cache.json", "cache.lock", "cache.dirty.json", "reminders.json", "sync.log", "sync-order.json")
 
 
 class CaldavResponseTooLarge(ValueError):
@@ -863,7 +871,7 @@ def eds_client_for_calendar(calendar_id: str):
     modules = load_eds_modules()
     registry = modules.EDataServer.SourceRegistry.new_sync(None)
     source = source_for_calendar(registry, calendar_id, modules)
-    client = modules.ECal.Client.connect_sync(source, modules.ECal.ClientSourceType.EVENTS, 8, None)
+    client = modules.ECal.Client.connect_sync(source, modules.ECal.ClientSourceType.EVENTS, EDS_CONNECT_WAIT_SECONDS, None)
     return modules, registry, source, client
 
 
@@ -2443,7 +2451,7 @@ def apply_collection_report(href: str, username: str, password: str, token: str,
             return incomplete("resource-fetch", failed=fetch_failures[:8])
         if hydrated and parse_client is None and source is not None:
             try:
-                parse_client = modules.ECal.Client.connect_sync(source, modules.ECal.ClientSourceType.EVENTS, 10, None)
+                parse_client = modules.ECal.Client.connect_sync(source, modules.ECal.ClientSourceType.EVENTS, EDS_CONNECT_WAIT_SECONDS, None)
             except Exception:
                 parse_client = None
         replaced = removed + [str(item.get("uid") or "") for item in hydrated if item.get("uid")]
@@ -2620,10 +2628,15 @@ def eds_snapshot(start: datetime, end: datetime, include_events: bool = True, if
     remote_touches: dict[str, list] = {}
     sync_log("snapshot-start", ifChanged=if_changed, includeEvents=include_events, rev=start_rev)
     sources = list(registry.list_sources(modules.EDataServer.SOURCE_EXTENSION_CALENDAR))
-    sources.sort(key=lambda item: (0 if is_omarchy_source_uid(item.get_uid()) else 1, item.get_display_name() or ""))
+    # Least recently attempted first, so calendars a budget-limited run skipped go first next time.
+    sync_order = read_sync_order()
+    sources.sort(key=lambda item: (sync_order.get(str(item.get_uid() or ""), ""), 0 if is_omarchy_source_uid(item.get_uid()) else 1, item.get_display_name() or ""))
     window_start = min(start, datetime.now(UTC) - timedelta(days=400))
     window_end = max(end, datetime.now(UTC) + timedelta(days=400))
     seen_caldav = set()
+    snapshot_budget_end = time.monotonic() + SNAPSHOT_BUDGET_SECONDS
+    snapshot_hard_end = snapshot_budget_end + SNAPSHOT_GRACE_SECONDS
+    budget_skipped = []
 
     for source in sources:
         if not registry.check_enabled(source):
@@ -2644,7 +2657,18 @@ def eds_snapshot(start: datetime, end: datetime, include_events: bool = True, if
         listed = False
         client = None
         cached_for_cal = [event for event in (cache.get("events") or []) if (event or {}).get("calendarId") == calendar["id"]]
-        calendar_deadline = time.monotonic() + CALDAV_SYNC_SECONDS
+        if include_events and time.monotonic() >= snapshot_budget_end:
+            calendars.append(calendar)
+            calendar["readonly"] = True if source_kind == "webcal" else (False if is_omarchy_source_uid(source.get_uid()) else calendar.get("readonly"))
+            if len(events) + len(cached_for_cal) <= MAX_EVENTS:
+                events.extend(cached_for_cal)
+            calendar_modes[calendar["id"]] = "unchanged"
+            remote_touches[calendar["id"]] = []
+            budget_skipped.append(calendar["id"])
+            continue
+        if include_events:
+            sync_order[str(source.get_uid() or "")] = iso(datetime.now(UTC))
+        calendar_deadline = min(time.monotonic() + CALDAV_SYNC_SECONDS, snapshot_hard_end)
         try:
             calendars.append(calendar)
             listed = True
@@ -2657,12 +2681,17 @@ def eds_snapshot(start: datetime, end: datetime, include_events: bool = True, if
                 except Exception as error:
                     sync_log("sync-calendar-error", calendarId=calendar.get("id"), error=str(error)[:200], ifChanged=if_changed)
                     mode, synced, remote_uids = (("unchanged", [], []) if cached_for_cal else ("eds", [], []))
+                if mode == "eds":
+                    # The EDS fallback reads the local EDS store and needs its own allowance: a
+                    # direct sync that failed late used to leave none, and the calendar kept its
+                    # stale cached copy on every run (KR - private, 1 to 3 Nov 2026).
+                    calendar_deadline = min(time.monotonic() + CALDAV_SYNC_SECONDS, snapshot_hard_end)
             elif direct_webcal:
                 remaining = calendar_deadline - time.monotonic()
                 if remaining <= 0:
                     raise TimeoutError("Calendar synchronization timed out.")
                 with enforce_http_deadline(remaining):
-                    client = modules.ECal.Client.connect_sync(source, modules.ECal.ClientSourceType.EVENTS, max(1, min(10, int(remaining))), None)
+                    client = modules.ECal.Client.connect_sync(source, modules.ECal.ClientSourceType.EVENTS, EDS_CONNECT_WAIT_SECONDS, None)
                 mode, synced, remote_uids = webcal_sync_calendar(
                     source,
                     modules,
@@ -2698,7 +2727,7 @@ def eds_snapshot(start: datetime, end: datetime, include_events: bool = True, if
             if remaining <= 0:
                 raise TimeoutError("Calendar synchronization timed out.")
             with enforce_http_deadline(remaining):
-                client = modules.ECal.Client.connect_sync(source, modules.ECal.ClientSourceType.EVENTS, max(1, min(10, int(remaining))), None)
+                client = modules.ECal.Client.connect_sync(source, modules.ECal.ClientSourceType.EVENTS, EDS_CONNECT_WAIT_SECONDS, None)
             if time.monotonic() >= calendar_deadline:
                 raise TimeoutError("Calendar synchronization timed out.")
             calendar["readonly"] = True if source_kind == "webcal" else (False if is_omarchy_source_uid(source.get_uid()) else bool(client.is_readonly()))
@@ -2751,6 +2780,11 @@ def eds_snapshot(start: datetime, end: datetime, include_events: bool = True, if
             else:
                 sync_state_map(cache).pop(calendar["id"], None)
             errors.append({"calendarId": calendar["id"], "code": "calendar-error", "message": str(error)})
+
+    if budget_skipped:
+        sync_log("snapshot-budget", budgetSeconds=SNAPSHOT_BUDGET_SECONDS, skipped=len(budget_skipped), calendars=budget_skipped)
+    if include_events:
+        write_sync_order(sync_order)
 
     payload = {
         "ok": True,
@@ -2918,6 +2952,32 @@ def cache_dir() -> Path:
         except OSError:
             pass
     return path
+
+
+def sync_order_file() -> Path:
+    path = cache_dir() / "sync-order.json"
+    secure_private_file(path)
+    return path
+
+
+def read_sync_order() -> dict:
+    try:
+        with private_text_file(sync_order_file(), os.O_RDONLY, "r") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return {}
+    return {str(key): str(value) for key, value in data.items()} if isinstance(data, dict) else {}
+
+
+def write_sync_order(order: dict) -> None:
+    try:
+        path = sync_order_file()
+        temp = path.with_name(path.name + ".tmp")
+        with private_text_file(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, "w") as handle:
+            json.dump(order, handle, separators=(",", ":"))
+        os.replace(temp, path)
+    except OSError as error:
+        sync_log("sync-order-write-failed", error=str(error)[:200])
 
 
 def sync_log(message: str, **fields) -> None:
