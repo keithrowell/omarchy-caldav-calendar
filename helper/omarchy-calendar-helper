@@ -39,6 +39,10 @@ MAX_ERROR_BYTES = 64 * 1024
 MAX_CALDAV_RESPONSE_BYTES = 32 * 1024 * 1024
 MAX_CALDAV_TRANSACTION_BYTES = 64 * 1024 * 1024
 CALDAV_READ_CHUNK = 64 * 1024
+# MAX_EVENTS caps one calendar's read and the combined set the panel receives. The
+# combined set is trimmed by trim_events, which drops the oldest past events first, so
+# the cap can never cost today's or upcoming events (4 Nov 2026: the running total hit
+# 8000 before the Google calendars were read, and the bar lost that day's meetings).
 MAX_EVENTS = 8000
 MAX_DAV_HREF_CHARS = 8192
 MAX_DAV_TOKEN_BYTES = 16 * 1024
@@ -256,6 +260,32 @@ def bound_items(items, limit: int) -> list:
     return items[:limit]
 
 
+def trim_events(events, limit: int = MAX_EVENTS, now: datetime | None = None) -> list:
+    """Keep at most `limit` events, dropping the oldest past events first.
+
+    Events that have not ended are kept ahead of every past event. Only when those
+    alone exceed the limit are the furthest-future ones dropped. Order is preserved.
+    """
+    if not isinstance(events, list):
+        return []
+    if len(events) <= limit:
+        return events
+    now = now or datetime.now(UTC)
+    far_past = datetime.min.replace(tzinfo=UTC)
+    ranked = []
+    for index, event in enumerate(events):
+        start = parse_event_instant((event or {}).get("start")) if isinstance(event, dict) else None
+        end = (parse_event_instant((event or {}).get("end")) if isinstance(event, dict) else None) or start
+        if end is None:
+            ranked.append(((2, 0.0), index))
+        elif end >= now:
+            ranked.append(((0, (start or end).timestamp()), index))
+        else:
+            ranked.append(((1, -(end - far_past).total_seconds()), index))
+    keep = sorted(index for _rank, index in sorted(ranked)[:max(0, limit)])
+    return [events[index] for index in keep]
+
+
 def bound_payload(payload: dict) -> dict:
     if not isinstance(payload, dict):
         return {
@@ -268,7 +298,7 @@ def bound_payload(payload: dict) -> dict:
     if "calendars" in bounded:
         bounded["calendars"] = bound_items(bounded.get("calendars"), MAX_CALENDARS)
     if "events" in bounded:
-        bounded["events"] = bound_items(bounded.get("events"), MAX_EVENTS)
+        bounded["events"] = trim_events(bounded.get("events"), MAX_EVENTS)
     if "fired" in bounded:
         bounded["fired"] = bound_items(bounded.get("fired"), MAX_FIRED)
     error = bounded.get("error")
@@ -2660,8 +2690,7 @@ def eds_snapshot(start: datetime, end: datetime, include_events: bool = True, if
         if include_events and time.monotonic() >= snapshot_budget_end:
             calendars.append(calendar)
             calendar["readonly"] = True if source_kind == "webcal" else (False if is_omarchy_source_uid(source.get_uid()) else calendar.get("readonly"))
-            if len(events) + len(cached_for_cal) <= MAX_EVENTS:
-                events.extend(cached_for_cal)
+            events.extend(cached_for_cal)
             calendar_modes[calendar["id"]] = "unchanged"
             remote_touches[calendar["id"]] = []
             budget_skipped.append(calendar["id"])
@@ -2701,7 +2730,7 @@ def eds_snapshot(start: datetime, end: datetime, include_events: bool = True, if
                     window_start,
                     window_end,
                     if_changed,
-                    MAX_EVENTS - len(events),
+                    MAX_EVENTS,
                     calendar_deadline,
                 )
             calendar_modes[calendar["id"]] = mode
@@ -2709,14 +2738,10 @@ def eds_snapshot(start: datetime, end: datetime, include_events: bool = True, if
             sync_log("sync-calendar", calendarId=calendar["id"], name=calendar.get("name"), host=calendar.get("host"), mode=mode, ifChanged=if_changed, cached=len(cached_for_cal))
             if mode == "unchanged":
                 calendar["readonly"] = True if source_kind == "webcal" else (False if is_omarchy_source_uid(source.get_uid()) else calendar.get("readonly"))
-                if len(events) + len(cached_for_cal) > MAX_EVENTS:
-                    raise ValueError("Calendar snapshot exceeded the event limit.")
                 events.extend(cached_for_cal)
                 continue
             if mode == "updated":
                 calendar["readonly"] = True if source_kind == "webcal" else (False if is_omarchy_source_uid(source.get_uid()) else calendar.get("readonly"))
-                if len(events) + len(synced) > MAX_EVENTS:
-                    raise ValueError("Calendar snapshot exceeded the event limit.")
                 events.extend(synced)
                 if direct_webcal:
                     full_map = cache.get("_full") if isinstance(cache.get("_full"), dict) else {}
@@ -2749,10 +2774,8 @@ def eds_snapshot(start: datetime, end: datetime, include_events: bool = True, if
                     if pending_state is not None:
                         raise
             pulled = []
-            if not eds_pull_calendar_events(client, calendar, window_start, window_end, modules, pulled, MAX_EVENTS - len(events), calendar_deadline):
+            if not eds_pull_calendar_events(client, calendar, window_start, window_end, modules, pulled, MAX_EVENTS, calendar_deadline):
                 raise ValueError("Evolution Data Server returned an incomplete calendar snapshot.")
-            if len(events) + len(pulled) > MAX_EVENTS:
-                raise ValueError("Calendar snapshot exceeded the event limit.")
             events.extend(pulled)
             calendar_modes[calendar["id"]] = "updated"
             remote_touches[calendar["id"]] = list({key for event in pulled for key in event_sync_keys(event) | event_occurrence_keys(event)})
@@ -2770,8 +2793,7 @@ def eds_snapshot(start: datetime, end: datetime, include_events: bool = True, if
             calendar["readonly"] = True if source_kind == "webcal" else (False if is_omarchy_source_uid(source.get_uid()) else True)
             if not listed:
                 calendars.append(calendar)
-            if len(events) + len(cached_for_cal) <= MAX_EVENTS:
-                events.extend(cached_for_cal)
+            events.extend(cached_for_cal)
             calendar_modes[calendar["id"]] = "unchanged"
             remote_touches[calendar["id"]] = []
             previous_state = start_state.get(calendar["id"])
@@ -2804,6 +2826,10 @@ def eds_snapshot(start: datetime, end: datetime, include_events: bool = True, if
         payload["_full"] = cache.get("_full") if isinstance(cache.get("_full"), dict) else {}
         payload["_startRev"] = start_rev
         payload = adopt_newer_cache_events(payload, start_rev, calendar_modes, remote_touches, start_state, payload["_removed"])
+        before_trim = len(payload.get("events") or [])
+        payload["events"] = trim_events(payload.get("events"), MAX_EVENTS)
+        if len(payload["events"]) < before_trim:
+            sync_log("snapshot-trimmed", events=before_trim, kept=len(payload["events"]))
         public_payload = {key: value for key, value in payload.items() if not key.startswith("_")}
         item_overflow = len(public_payload.get("events") or []) > MAX_EVENTS or len(public_payload.get("calendars") or []) > MAX_CALENDARS
         response_overflow = len(json.dumps(public_payload, separators=(",", ":")).encode("utf-8")) > MAX_STDOUT_BYTES
@@ -3470,7 +3496,7 @@ def read_cache() -> dict | None:
     if not isinstance(data, dict) or data.get("ok") is not True:
         return None
     data["calendars"] = bound_items(data.get("calendars"), MAX_CALENDARS)
-    data["events"] = bound_items(data.get("events"), MAX_EVENTS)
+    data["events"] = trim_events(data.get("events"), MAX_EVENTS)
     dirty = read_dirty_journal()
     data["localTouches"] = merge_touch_maps(local_touch_map(data), local_touch_map(dirty))
     data["rev"] = max(cache_rev(data), cache_rev(dirty), touch_map_rev(data["localTouches"]))
@@ -3504,7 +3530,7 @@ def cached_snapshot(start: datetime, end: datetime, provider: str) -> dict:
         "ok": True,
         "provider": cache.get("provider") or provider,
         "calendars": bound_items(cache.get("calendars"), MAX_CALENDARS),
-        "events": bound_items(cache.get("events"), MAX_EVENTS),
+        "events": trim_events(cache.get("events"), MAX_EVENTS),
         "cached": True,
         "cachedAt": cache.get("cachedAt") or "",
         "range": {"start": iso(start), "end": iso(end)},
