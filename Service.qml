@@ -49,6 +49,7 @@ Item {
 
   signal refreshed()
   signal eventCreated(var event)
+  signal eventUpdated(var event)
   signal eventSaved(bool ok, string message)
   signal setupFinished(bool ok, string message)
   // The calendar agent's answer to askAgent(): {ok, reply, question, event,
@@ -358,6 +359,7 @@ Item {
       }
       root.status = "ready"
       root.errorMessage = ""
+      if (payload.event) root.eventUpdated(payload.event)
       root.eventSaved(true, "")
       if (root.pendingUpdateOriginal && payload.event && root.pendingUpdateOriginal.calendarId !== payload.event.calendarId) root.readCache()
       else if (root.activeStart && root.activeEnd) root.startLiveSync(true)

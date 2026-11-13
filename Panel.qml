@@ -76,6 +76,17 @@ Panel {
   property var agentTurns: []
   property var agentProposal: null
   property bool agentWaiting: false
+  // The agent books as soon as it answers. agentBooked is the saved event;
+  // follow-up requests and the form's Save change that event.
+  property var agentBooked: null
+  property string agentSaveState: ""   // "", "saving", "saved", "failed"
+  property string agentSaveError: ""
+  property bool agentAwaitingSave: false
+  property bool agentBookQueued: false
+  // While editing an event: its fields when the form opened, for Undo, and
+  // whether the agent has changed it since.
+  property var agentOriginal: null
+  property bool agentEdited: false
   property string agentName: ""
   property string removeCandidateName: ""
   property bool draggingTimeSelection: false
@@ -870,6 +881,13 @@ Panel {
     agentWaiting = false
     agentTurns = []
     agentProposal = null
+    agentBooked = null
+    agentSaveState = ""
+    agentSaveError = ""
+    agentAwaitingSave = false
+    agentBookQueued = false
+    agentOriginal = null
+    agentEdited = false
     createTab = "form"
   }
 
@@ -881,13 +899,29 @@ Panel {
       if (agentTurns[i].role === "user" || agentTurns[i].role === "agent") history.push({ role: agentTurns[i].role, text: agentTurns[i].text })
     agentTurns = agentTurns.concat([{ role: "user", text: prompt }])
     agentWaiting = true
-    calendarService.askAgent({
+    var request = {
       prompt: prompt,
       history: history,
       hidden: hiddenCalendars,
       names: calendarNames,
       defaultCalendarId: selectedWritableCalendarId()
-    })
+    }
+    var current = editingEvent || agentBooked
+    if (current) request.excludeUid = String(current.uid || "")
+    if (editingEvent) {
+      request.editing = {
+        title: titleField.text,
+        calendarId: createCalendarId || editingEvent.calendarId,
+        allDay: createAllDay,
+        date: createDateKey,
+        start: createAllDay ? "" : createStartTime,
+        end: createAllDay ? "" : createEndTime,
+        location: locationField.text,
+        series: editScope === "all" && eventIsRecurring(editingEvent),
+        occurrence: editScope !== "all" && eventIsRecurring(editingEvent)
+      }
+    }
+    calendarService.askAgent(request)
   }
 
   function handleAgentAnswer(answer) {
@@ -902,7 +936,136 @@ Panel {
     if (answer.question) text = text ? text + " " + answer.question : answer.question
     agentTurns = agentTurns.concat([{ role: "agent", text: text, conflicts: answer.conflicts || [] }])
     // After any pending form reset from opening the form.
-    if (answer.event) Qt.callLater(function() { root.applyAgentEvent(answer.event) })
+    var book = !answer.question
+    if (answer.event) Qt.callLater(function() {
+      root.applyAgentEvent(answer.event)
+      if (book && root.editingEvent) root.agentEdited = true
+      if (book) root.bookAgentProposal()
+      else if (!root.agentBooked && !root.agentEdited) root.agentSaveState = ""
+    })
+  }
+
+  // Save the agent's proposal now. A second proposal in the same
+  // conversation changes the event already booked instead of adding another.
+  function bookAgentProposal() {
+    var proposal = agentProposal
+    if (!proposal || !calendarService) return
+    // A change that arrives while the last save is in flight waits for it.
+    if (agentAwaitingSave) { agentBookQueued = true; return }
+    if (editingEvent) {
+      // applyAgentEvent has filled the form: save it the way Save does, and
+      // leave the form open on the changed event.
+      agentSaveState = "saving"
+      agentSaveError = ""
+      agentAwaitingSave = true
+      commitCreatingEvent(true)
+      if (createError) { agentEventSaved(false, createError); return }
+      Qt.callLater(function() {
+        if (root.agentAwaitingSave && calendarService.status !== "saving") root.agentEventSaved(false, calendarService.errorMessage)
+      })
+      return
+    }
+    var dateKey = proposal.date
+    var allDay = proposal.allDay === true
+    var startIso = allDay ? dateKey : Model.dateTimeIso(dateKey, createStartTime)
+    var endIso = allDay ? Model.nextDateKey(dateKey) : Model.endDateTimeIso(dateKey, createStartTime, createEndTime)
+    var calendarId = proposal.calendarId || createCalendarId || selectedWritableCalendarId()
+    if (!startIso || !endIso || !calendarId) {
+      agentSaveState = "failed"
+      agentSaveError = !calendarId ? "No writable calendar is available." : "The time didn't make sense."
+      return
+    }
+    var title = proposal.title || "(No title)"
+    var location = proposal.location || ""
+    var rrule = proposal.rrule || ""
+    var booked = agentBooked
+    // A changed repeat can't be edited in place: replace the event.
+    if (booked && String(booked.agentRrule || "") !== rrule) {
+      calendarService.deleteEvent(booked, "all")
+      agentBooked = null
+      booked = null
+    }
+    agentSaveState = "saving"
+    agentSaveError = ""
+    agentAwaitingSave = true
+    if (booked) calendarService.updateEvent(booked, title, startIso, endIso, location, booked.description || "", "all", allDay, calendarId, "", "none")
+    else calendarService.createEvent(calendarId, title, startIso, endIso, location, "", rrule || "never", allDay, "", "none")
+    // The service refuses some writes (a read-only calendar) without a signal.
+    if (agentAwaitingSave && calendarService.status !== "saving") agentEventSaved(false, calendarService.errorMessage)
+  }
+
+  function agentEventSaved(ok, message) {
+    if (!agentAwaitingSave) return
+    agentAwaitingSave = false
+    var queued = agentBookQueued
+    agentBookQueued = false
+    if (ok && (agentBooked || editingEvent)) {
+      agentSaveState = "saved"
+      if (queued) Qt.callLater(root.bookAgentProposal)
+      return
+    }
+    agentSaveState = "failed"
+    agentSaveError = message || "Could not save the event."
+    agentTurns = agentTurns.concat([{ role: "error", text: (agentBooked || editingEvent ? "That change didn't save: " : "That didn't book: ") + agentSaveError }])
+  }
+
+  function agentEventStored(event) {
+    if (!agentAwaitingSave || !event) return
+    var kept = JSON.parse(JSON.stringify(event))
+    if (editingEvent) {
+      // Keep editing the event as it now is (a calendar move changes its id).
+      if (kept.recurring === undefined) kept.recurring = editingEvent.recurring === true
+      if (!kept.rid && editingEvent.rid && editScope !== "all") kept.rid = editingEvent.rid
+      kept.status = ""
+      editingEvent = kept
+      return
+    }
+    kept.agentRrule = agentProposal ? String(agentProposal.rrule || "") : ""
+    agentBooked = kept
+  }
+
+  function fillFormFromEvent(event) {
+    titleField.text = event.title || ""
+    createAllDay = event.allDay === true
+    createDateKey = (event.allDay ? Model.eventDateKey(event) : Model.localDateKeyFromIso(event.start)) || createDateKey
+    createStartTime = event.allDay ? "09:00" : slotValueFromIso(event.start)
+    createEndTime = event.allDay ? "10:00" : slotValueFromIso(event.end)
+    createCalendarId = event.calendarId || createCalendarId
+    locationField.text = event.location || ""
+    createMeetingUrl = event.meetingUrl || ""
+    createMeetingKind = event.meetingUrl ? "link" : "none"
+  }
+
+  // Put an edited event back the way it was when the form opened.
+  function undoAgentEdit() {
+    var original = agentOriginal
+    if (!editingEvent || !original || !calendarService || agentAwaitingSave) return
+    agentSaveState = "saving"
+    agentSaveError = ""
+    agentAwaitingSave = true
+    agentEdited = false
+    agentProposal = null
+    fillFormFromEvent(original)
+    selectedKey = createDateKey
+    agentTurns = agentTurns.concat([{ role: "agent", text: "Put it back the way it was." }])
+    calendarService.updateEvent(editingEvent, original.title, original.start, original.end, original.location || "", original.description || "", editScope, original.allDay === true, original.calendarId, original.meetingUrl || "", original.meetingUrl ? "link" : "none")
+    if (agentAwaitingSave && calendarService.status !== "saving") agentEventSaved(false, calendarService.errorMessage)
+  }
+
+  function undoAgentBooking() {
+    if (!agentBooked || !calendarService || agentAwaitingSave) return
+    calendarService.deleteEvent(agentBooked, "all")
+    agentBooked = null
+    agentSaveState = ""
+    agentTurns = agentTurns.concat([{ role: "agent", text: "Removed it from your calendar." }])
+  }
+
+  function agentStatusText() {
+    var changing = !!(agentBooked || editingEvent)
+    if (agentSaveState === "saving") return changing ? "Saving the change…" : "Booking…"
+    if (agentSaveState === "saved") return editingEvent ? "Saved" : "Booked"
+    if (agentSaveState === "failed") return (changing ? "Change not saved: " : "Not booked: ") + agentSaveError
+    return editingEvent ? "Not saved yet" : "Not booked yet"
   }
 
   function applyAgentEvent(event) {
@@ -915,7 +1078,7 @@ Panel {
       createEndTime = event.end || createStartTime
     }
     if (event.calendarId) createCalendarId = event.calendarId
-    createRecurrence = event.rrule ? Model.parseRRule(event.rrule, event.date) : Model.defaultRecurrence(event.date)
+    if (!editingEvent) createRecurrence = event.rrule ? Model.parseRRule(event.rrule, event.date) : Model.defaultRecurrence(event.date)
     titleField.text = event.title || ""
     locationField.text = event.location || ""
     var date = Model.dateFromKey(event.date, today)
@@ -967,6 +1130,8 @@ Panel {
     createError = ""
     showingSetup = false
     showingSettings = false
+    resetAgent()
+    agentOriginal = JSON.parse(JSON.stringify(event))
     editingEvent = event
     editScope = scope || (root.eventIsRecurring(event) ? "this" : "all")
     selectedKey = (event.allDay ? Model.eventDateKey(event) : Model.localDateKeyFromIso(event.start)) || selectedKey
@@ -1044,7 +1209,7 @@ Panel {
     return "week" + plural
   }
 
-  function commitCreatingEvent() {
+  function commitCreatingEvent(keepOpen) {
     if (!creatingEvent) return
     createDateKey = Model.nextOccurrenceDate(createDateKey, createRecurrence)
     var startIso = createAllDay ? createDateKey : Model.dateTimeIso(createDateKey, createStartTime)
@@ -1074,15 +1239,17 @@ Panel {
     var location = locationField.text
     if (meetingUrl && location.indexOf(meetingUrl) < 0 && location.indexOf(meetingInput) < 0) location = location ? (location + " · " + meetingUrl) : meetingUrl
     var service = calendarService
-    var editedEvent = editingEvent
+    var editedEvent = editingEvent || agentBooked
     var title = titleField.text
     var recurrence = Model.serializeRecurrence(root.createRecurrence)
     var allDay = createAllDay
     var meetingKind = root.createMeetingKind
-    var scope = root.editScope
+    var scope = editingEvent ? root.editScope : "all"
     var destinationCalendarId = createCalendarId
-    creatingEvent = false
-    editingEvent = null
+    if (keepOpen !== true) {
+      creatingEvent = false
+      editingEvent = null
+    }
     createError = ""
     Qt.callLater(function() {
       if (editedEvent) service.updateEvent(editedEvent, title, startIso, endIso, location, editedEvent.description || "", scope, allDay, destinationCalendarId, meetingUrl, meetingKind)
@@ -1124,7 +1291,10 @@ Panel {
 
   Connections {
     target: calendarService
+    function onEventCreated(event) { root.agentEventStored(event) }
+    function onEventUpdated(event) { root.agentEventStored(event) }
     function onEventSaved(ok, message) {
+      if (root.agentAwaitingSave) { root.agentEventSaved(ok, message); return }
       if (ok || root.creatingEvent) return
       root.createError = message || "Could not save the event."
     }
@@ -1439,7 +1609,7 @@ Panel {
               visible: root.creatingEvent && !root.showingSettings
               width: parent.width
               // Side by side when there's room, otherwise Form and Ask tabs.
-              readonly property bool wide: width >= Style.space(900) && !root.editingEvent
+              readonly property bool wide: width >= Style.space(900)
               height: (createTabs.visible ? createTabs.height + Style.space(10) : 0) + Math.max(createForm.visible ? createForm.implicitHeight : 0, agentPane.visible ? agentPane.implicitHeight : 0) + Style.space(20)
               Keys.onEscapePressed: root.cancelCreatingEvent()
               radius: Style.cornerRadius
@@ -1449,7 +1619,7 @@ Panel {
 
               SegmentedChoice {
                 id: createTabs
-                visible: !createBox.wide && !root.editingEvent
+                visible: !createBox.wide
                 anchors.top: parent.top
                 anchors.left: parent.left
                 anchors.margins: Style.space(10)
@@ -1460,7 +1630,7 @@ Panel {
 
               Column {
                 id: createForm
-                visible: createBox.wide || root.editingEvent || root.createTab === "form"
+                visible: createBox.wide || root.createTab === "form"
                 anchors.top: createTabs.visible ? createTabs.bottom : parent.top
                 anchors.left: parent.left
                 anchors.margins: Style.space(10)
@@ -1914,7 +2084,7 @@ Panel {
               // event from a plain request. Its proposal fills the form.
               Column {
                 id: agentPane
-                visible: !root.editingEvent && (createBox.wide || root.createTab === "agent")
+                visible: createBox.wide || root.createTab === "agent"
                 anchors.top: createTabs.visible ? createTabs.bottom : parent.top
                 anchors.right: parent.right
                 anchors.margins: Style.space(10)
@@ -1933,7 +2103,9 @@ Panel {
                 Text {
                   visible: root.agentTurns.length === 0
                   width: parent.width
-                  text: "Say what to add, like “tennis next Thursday” or “dinner with Mum Saturday 7”. It knows your calendar and habits, avoids clashes and fills in the form for you to check."
+                  text: root.editingEvent
+                    ? "Say what to change, like “move it to 3pm”, “make it two hours” or “put it in Agenta”. It's saved straight away."
+                    : "Say what to add, like “tennis next Thursday” or “dinner with Mum Saturday 7”. It knows your calendar and habits, avoids clashes and books it straight away. Ask again to change it."
                   wrapMode: Text.WordWrap
                   color: Commons.Color.muted
                   font.family: root.bar ? root.bar.fontFamily : Style.font.family
@@ -1994,10 +2166,23 @@ Panel {
                       font.family: root.bar ? root.bar.fontFamily : Style.font.family
                       font.pixelSize: Style.font.bodySmall
                     }
+                    Text {
+                      width: parent.width
+                      text: root.agentStatusText()
+                      wrapMode: Text.WordWrap
+                      textFormat: Text.PlainText
+                      color: root.agentSaveState === "failed" ? Commons.Color.urgent : (root.agentSaveState === "saved" ? Commons.Color.foreground : Commons.Color.muted)
+                      font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                      font.pixelSize: Style.font.bodySmall
+                      font.bold: root.agentSaveState === "saved"
+                    }
                     Row {
                       spacing: Style.space(6)
-                      Button { text: "Save"; bordered: true; selected: true; onClicked: root.commitCreatingEvent() }
-                      Button { visible: !createBox.wide; text: "Check in form"; bordered: true; onClicked: root.createTab = "form" }
+                      Button { visible: root.agentSaveState === "" || root.agentSaveState === "failed"; text: root.agentSaveState === "failed" ? "Try again" : (root.editingEvent ? "Save it" : "Book it"); bordered: true; selected: true; onClicked: root.bookAgentProposal() }
+                      Button { visible: root.agentSaveState === "saved" && !root.editingEvent; text: "Undo"; bordered: true; onClicked: root.undoAgentBooking() }
+                      Button { visible: root.agentSaveState === "saved" && !!root.editingEvent && root.agentEdited; text: "Undo changes"; bordered: true; onClicked: root.undoAgentEdit() }
+                      Button { visible: root.agentSaveState === "saved"; text: "Done"; bordered: true; selected: true; onClicked: root.cancelCreatingEvent() }
+                      Button { visible: !createBox.wide && root.agentSaveState !== "saving"; text: "Edit in form"; bordered: true; onClicked: root.createTab = "form" }
                     }
                   }
                 }
@@ -2008,7 +2193,7 @@ Panel {
                   TextField {
                     id: agentInput
                     width: parent.width - agentSend.width - parent.spacing
-                    placeholderText: root.agentTurns.length ? "Change it, e.g. “make it 7pm”" : "e.g. tennis next Thursday"
+                    placeholderText: root.agentTurns.length || root.editingEvent ? "Change it, e.g. “make it 7pm”" : "e.g. tennis next Thursday"
                     enabled: !(calendarService && calendarService.agentBusy)
                     onAccepted: agentSend.clicked()
                   }

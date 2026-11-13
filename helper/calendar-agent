@@ -5,7 +5,10 @@ Reads one JSON request on stdin:
 
   {"prompt": "...", "history": [{"role": "user"|"agent", "text": "..."}],
    "hidden": {calendarId: true}, "names": {calendarId: name},
-   "defaultCalendarId": "...", "timeFormat": "12h"|"24h"}
+   "defaultCalendarId": "...", "timeFormat": "12h"|"24h",
+   "excludeUid": "uid of the event being changed, left out of clash checks",
+   "editing": {title, calendarId, allDay, date, start, end, location,
+               series, occurrence}}   # only when an existing event is open
 
 and prints one JSON answer:
 
@@ -16,8 +19,9 @@ and prints one JSON answer:
 The agent is the one chosen with `omarchy default agent`. It gets the
 writable calendars, everything already booked over the next six weeks, and a
 summary of the last three months as the user's habits. It runs with no tools
-and no access beyond this prompt; the panel only fills its form from the
-answer, so nothing is saved until the user presses Save.
+and no access beyond this prompt. The panel saves a "propose" answer to the
+calendar at once, and a later answer in the same conversation changes that
+saved event. An "ask" answer saves nothing.
 """
 
 import json
@@ -73,8 +77,10 @@ How to choose:
 - Give the event a short, natural title in the user's own style (see Habits).
 - Use rrule only when the user asks for a repeat ("every thursday", "weekly").
 - calendarId must be one of the ids in Writable calendars. Prefer the calendar this kind of event usually goes in (Habits). Never pick a calendar marked "this computer only" unless asked: it doesn't reach the user's phone. Personal things go in iCloud, work in the work account.
-- If the request is too vague to place sensibly, set action to "ask" and ask one short question; still fill event with your best guess.
-- Follow-up messages refine the previous proposal ("make it 7", "the week after"); keep everything else the same.
+- Your answer is acted on at once. With action "propose" the event is saved to the calendar as you answer, so say it as done ("Booked for Thursday 29 October, ..."). Never ask the user to confirm or save.
+- Use action "ask" only when the request is too vague to place sensibly: ask one short question and still fill event with your best guess. Nothing is saved with "ask", so don't say it is booked.
+- When "Event being changed" is given, the user has an existing event open and the request changes it ("move it to 3", "make it two hours", "put it in the work calendar", "call it X"). Return that event with only what was asked changed; keep its title, calendar, date, times and location otherwise. Keep the same duration when only the start moves. The change is saved as you answer, so say what changed as done ("Moved to 3:00 pm, still an hour."). Its repeat can't be changed here: leave rrule empty, and if the user asks to change the repeat, or to delete the event, use action "ask" and tell them to use the form or its Delete button.
+- Follow-up messages change the event already booked ("make it 7", "the week after", "put it in the work calendar"); keep everything else the same and say what changed ("Moved to ...").
 
 Write the reply in plain Australian English, one or two short sentences, no lists or markdown."""
 
@@ -167,16 +173,22 @@ def build_prompt(request, cache) -> tuple[str, dict]:
     calendars = [c for c in cache.get("calendars", []) if c.get("id")]
     for calendar in calendars:
         names.setdefault(calendar["id"], calendar.get("name") or "Calendar")
-    writable = [c for c in calendars if not c.get("readonly") and not hidden.get(c["id"])]
+    editing = request.get("editing") if isinstance(request.get("editing"), dict) else None
+    own_calendar = str(editing.get("calendarId") or "") if editing else ""
+    # An event's own calendar stays available even when it is hidden.
+    writable = [c for c in calendars if not c.get("readonly") and (not hidden.get(c["id"]) or c["id"] == own_calendar)]
     writable_ids = {c["id"] for c in writable}
     default_id = request.get("defaultCalendarId") or (writable[0]["id"] if writable else "")
+    if own_calendar in writable_ids:
+        default_id = own_calendar
     if default_id not in writable_ids and writable:
         default_id = writable[0]["id"]
 
     now = datetime.now()
     today = now.date()
     events = cache.get("events", [])
-    visible = [e for e in events if not hidden.get(e.get("calendarId"))]
+    exclude_uid = str(request.get("excludeUid") or "")
+    visible = [e for e in events if not hidden.get(e.get("calendarId")) and not (exclude_uid and e.get("uid") == exclude_uid)]
 
     upcoming = []
     horizon = today + timedelta(days=UPCOMING_DAYS)
@@ -197,6 +209,17 @@ def build_prompt(request, cache) -> tuple[str, dict]:
     conversation = "\n".join(f"{'User' if turn.get('role') == 'user' else 'You'}: {turn.get('text', '')}" for turn in history[-8:])
 
     tz = now.astimezone().tzname()
+    changing = ""
+    if editing:
+        when = f"{editing.get('date', '')} all day" if editing.get("allDay") else f"{editing.get('date', '')} {editing.get('start', '')}-{editing.get('end', '')}"
+        scope = "  (every occurrence of a repeating series)" if editing.get("series") else ("  (this one occurrence of a repeating series)" if editing.get("occurrence") else "")
+        changing = (
+            "Event being changed:\n"
+            f"title: {' '.join(str(editing.get('title') or '').split())}\n"
+            f"when: {when}{scope}\n"
+            f"calendarId: {own_calendar}  ({names.get(own_calendar, 'Calendar')})\n"
+            f"location: {' '.join(str(editing.get('location') or '').split())}\n\n"
+        )
     prompt = f"""Today is {now:%A %d %B %Y}, {now:%H:%M} local time ({tz}).
 
 Writable calendars (id  name):
@@ -208,7 +231,7 @@ Habits over the last {HISTORY_DAYS} days:
 Booked from yesterday to {horizon:%d %b %Y}:
 {chr(10).join(booked) or '(nothing)'}
 
-{('Conversation so far:' + chr(10) + conversation + chr(10) + chr(10)) if conversation else ''}Request: {request.get('prompt', '').strip()}
+{changing}{('Conversation so far:' + chr(10) + conversation + chr(10) + chr(10)) if conversation else ''}Request: {request.get('prompt', '').strip()}
 """
     return prompt, {"writable": writable_ids, "default": default_id, "visible": visible, "names": names}
 
@@ -287,6 +310,8 @@ def main() -> int:
         event["allDay"] = bool(event.get("allDay"))
         for key in ("title", "date", "start", "end", "location", "rrule"):
             event[key] = str(event.get(key) or "").strip()
+        if isinstance(request.get("editing"), dict):
+            event["rrule"] = ""
         try:
             date.fromisoformat(event["date"])
         except ValueError:

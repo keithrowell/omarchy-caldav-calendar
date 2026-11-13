@@ -95,7 +95,7 @@ import sys
 
 panel = open(sys.argv[1]).read()
 service = open(sys.argv[2]).read()
-commit = re.search(r"function commitCreatingEvent\(\) \{(.*?)\n  \}", panel, re.S)
+commit = re.search(r"function commitCreatingEvent\(\w*\) \{(.*?)\n  \}", panel, re.S)
 if commit is None:
     raise SystemExit("not ok - create event submit handler is missing")
 body = commit.group(1)
