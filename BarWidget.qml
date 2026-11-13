@@ -26,6 +26,19 @@ BarWidget {
   readonly property real openPanelIndicatorHeight: Math.max(Style.space(10), Math.round(Style.bar.iconSlot * 0.55))
   readonly property bool popoutSwitchClosing: panelLoader.item ? panelLoader.item.popoutSwitchClosing === true : false
 
+  // A meeting with a link that starts within joinLeadMinutes, or is under
+  // way, puts a Join button beside the clock. Hidden calendars never do.
+  readonly property var calendarService: bar && bar.shell ? bar.shell.serviceFor(root.moduleName) : null
+  readonly property int joinLeadMinutes: Math.max(0, Number(setting("joinLeadMinutes", 10)) || 0)
+  readonly property var joinEvent: {
+    if (!calendarService) return null
+    var hidden = calendarService.hiddenCalendars
+    var visible = (calendarService.cachedEvents || []).filter(function(event) { return !Model.calendarHidden(hidden, event && event.calendarId) })
+    return Model.meetingToJoin(visible, displayDate.getTime(), joinLeadMinutes)
+  }
+  readonly property bool joinShown: joinButton.url !== ""
+  readonly property real joinGap: joinShown ? Style.space(4) : 0
+
   function refresh() {
     displayDate = new Date()
     if (panelLoader.item && panelLoader.item.refresh) panelLoader.item.refresh()
@@ -103,8 +116,12 @@ BarWidget {
     else openWindow()
   }
 
-  implicitWidth: button.implicitWidth
-  implicitHeight: button.implicitHeight
+  implicitWidth: root.vertical
+    ? Math.max(button.implicitWidth, joinShown ? joinButton.width : 0)
+    : button.implicitWidth + (joinShown ? joinGap + joinButton.width : 0)
+  implicitHeight: root.vertical
+    ? button.implicitHeight + (joinShown ? joinGap + joinButton.height : 0)
+    : button.implicitHeight
 
   onBarChanged: injectPanel()
   onSettingsChanged: injectPanel()
@@ -168,7 +185,8 @@ BarWidget {
 
   WidgetButton {
     id: button
-    anchors.fill: parent
+    width: root.vertical ? parent.width : implicitWidth
+    height: root.vertical ? implicitHeight : parent.height
     bar: root.bar
     text: root.vertical ? "" : root.displayText
     labelVisible: !root.vertical
@@ -201,5 +219,16 @@ BarWidget {
         }
       }
     }
+  }
+
+  JoinButton {
+    id: joinButton
+    bar: root.bar
+    event: root.joinEvent
+    compact: true
+    iconOnly: root.vertical
+    visible: url !== ""
+    x: root.vertical ? (root.width - width) / 2 : button.width + root.joinGap
+    y: root.vertical ? button.height + root.joinGap : (root.height - height) / 2
   }
 }

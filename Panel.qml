@@ -756,12 +756,13 @@ Panel {
     var calendarName = root.eventCalendarName(event)
     if (calendarName) lines.push(calendarName)
     if (event.location) lines.push(event.location)
-    if (event.meetingUrl) lines.push("Join " + Model.meetingProviderLabel(event.meetingProvider))
+    var meeting = Model.eventMeeting(event)
+    if (meeting.url) lines.push("Join " + Model.meetingProviderLabel(meeting.provider))
     return Model.plainDisplay(lines.join("\n"), 600)
   }
 
   function joinEvent(event) {
-    var url = event && event.meetingUrl ? String(event.meetingUrl) : ""
+    var url = event ? String(Model.eventMeeting(event).url || "") : ""
     if (!/^https?:\/\//i.test(url) || !root.bar) return
     root.bar.run("xdg-open '" + url.replace(/'/g, "") + "'")
   }
@@ -2239,8 +2240,8 @@ Panel {
         Column {
           spacing: Style.space(2)
           EventMenuItem {
-            visible: !!(root.contextEvent && root.contextEvent.meetingUrl)
-            text: "Join " + Model.meetingProviderLabel(root.contextEvent ? root.contextEvent.meetingProvider : "")
+            visible: !!(root.contextEvent && Model.eventMeeting(root.contextEvent).url)
+            text: "Join " + Model.meetingProviderLabel(root.contextEvent ? Model.eventMeeting(root.contextEvent).provider : "")
             onClicked: {
               var event = root.contextEvent
               root.closeEventMenu()
@@ -4560,6 +4561,8 @@ Panel {
     readonly property bool saving: !!(event && event.status === "saving")
     readonly property bool showTime: mode === "block" ? height >= Style.space(36) : mode === "row"
     readonly property bool wrapTitle: mode === "block" && height >= Style.space(48)
+    readonly property bool joinBelow: mode === "block" && height >= Style.space(56)
+    readonly property real joinRoom: cardJoin.visible && !joinBelow ? cardJoin.width + Style.space(6) : 0
     // All-day entries are a light tint with an outline, so timed events
     // stand out against them.
     readonly property bool allDay: !!(event && (event.allDay === true || event.wholeDay === true))
@@ -4584,7 +4587,7 @@ Panel {
       visible: card.mode === "block"
       anchors.fill: parent
       anchors.leftMargin: Style.space(8)
-      anchors.rightMargin: Style.space(4)
+      anchors.rightMargin: Style.space(4) + card.joinRoom
       anchors.topMargin: Style.space(4)
       anchors.bottomMargin: Style.space(4)
       spacing: Style.space(1)
@@ -4613,27 +4616,20 @@ Panel {
       }
     }
 
-      Text {
-        visible: card.mode !== "chip" && !!(card.event && card.event.meetingUrl)
+      // Tall blocks put the button under the text; short blocks and list
+      // rows put it on the right and narrow the title to make room.
+      JoinButton {
+        id: cardJoin
         z: 8
+        visible: url !== "" && card.mode !== "chip" && !card.saving && card.width >= width + Style.space(40)
+        bar: root.bar
+        event: card.event
+        compact: card.mode === "block"
         anchors.right: parent.right
-        anchors.bottom: parent.bottom
-        anchors.margins: Style.space(4)
-        text: "Join"
-        color: card.labelColor
-        font.family: root.bar ? root.bar.fontFamily : Style.font.family
-        font.pixelSize: Style.font.caption
-        font.bold: true
-        font.underline: true
-        MouseArea {
-          anchors.fill: parent
-          anchors.margins: -Style.space(4)
-          cursorShape: Qt.PointingHandCursor
-          onClicked: function(mouse) {
-            mouse.accepted = true
-            root.joinEvent(card.event)
-          }
-        }
+        anchors.rightMargin: Style.space(4)
+        anchors.bottom: card.joinBelow ? parent.bottom : undefined
+        anchors.bottomMargin: Style.space(4)
+        anchors.verticalCenter: card.joinBelow ? undefined : parent.verticalCenter
       }
 
       Text {
@@ -4655,7 +4651,7 @@ Panel {
       visible: card.mode === "row"
       anchors.fill: parent
       anchors.leftMargin: Style.space(8)
-      anchors.rightMargin: Style.space(4)
+      anchors.rightMargin: Style.space(4) + card.joinRoom
       spacing: Style.space(6)
       Text {
         width: Style.space(56)

@@ -39,7 +39,12 @@ function localDateKeyFromIso(value) {
 var MEETING_PATTERNS = [
   { provider: 'zoom', match: /(?:https?:\/\/)?(?:[\w.-]+\.)?zoom\.us\/[^\s<>"']+/i },
   { provider: 'meet', match: /(?:https?:\/\/)?meet\.google\.com\/[^\s<>"']+/i },
-  { provider: 'teams', match: /(?:https?:\/\/)?teams\.(?:microsoft|live)\.com\/[^\s<>"']+/i }
+  { provider: 'teams', match: /(?:https?:\/\/)?teams\.(?:microsoft|live)\.com\/[^\s<>"']+/i },
+  { provider: 'webex', match: /(?:https?:\/\/)?[\w.-]+\.webex\.com\/[^\s<>"']+/i },
+  { provider: 'whereby', match: /(?:https?:\/\/)?whereby\.com\/[^\s<>"']+/i },
+  { provider: 'goto', match: /(?:https?:\/\/)?(?:meet\.goto\.com|global\.gotomeeting\.com\/join|app\.gotomeeting\.com)\/[^\s<>"']+/i },
+  { provider: 'jitsi', match: /(?:https?:\/\/)?meet\.jit\.si\/[^\s<>"']+/i },
+  { provider: 'chime', match: /(?:https?:\/\/)?chime\.aws\/[^\s<>"']+/i }
 ]
 
 function normalizeMeetingUrl(text) {
@@ -66,10 +71,45 @@ function eventMeeting(event) {
   return meetingFromText([raw.location, raw.description, raw.conference].filter(Boolean).join('\n'))
 }
 
+// The meeting the bar offers to join: a timed event with a meeting link
+// that starts within leadMinutes or is under way. One about to start wins
+// over one already running, so the next call is a click away while the
+// previous one overruns. Cancelled events (libical status 10905) are skipped.
+function meetingToJoin(events, nowMs, leadMinutes) {
+  var now = nowMs === undefined ? Date.now() : nowMs
+  var lead = Math.max(0, Number(leadMinutes) || 0) * 60 * 1000
+  var upcoming = null
+  var running = null
+  var list = events || []
+  for (var i = 0; i < list.length; i++) {
+    var event = list[i]
+    if (!event || event.allDay === true || event.wholeDay === true) continue
+    var status = String(event.status || '').toLowerCase()
+    if (status === 'cancelled' || status === '10905') continue
+    if (!eventMeeting(event).url) continue
+    var start = Date.parse(String(event.start || ''))
+    var end = Date.parse(String(event.end || ''))
+    if (isNaN(start)) continue
+    if (isNaN(end) || end <= start) end = start + 30 * 60 * 1000
+    if (now >= end || now < start - lead) continue
+    if (now < start) {
+      if (!upcoming || start < Date.parse(upcoming.start)) upcoming = event
+    } else if (!running || start > Date.parse(running.start)) {
+      running = event
+    }
+  }
+  return upcoming || running
+}
+
 function meetingProviderLabel(provider) {
   if (provider === 'zoom') return 'Zoom'
   if (provider === 'meet') return 'Google Meet'
   if (provider === 'teams') return 'Teams'
+  if (provider === 'webex') return 'Webex'
+  if (provider === 'whereby') return 'Whereby'
+  if (provider === 'goto') return 'GoTo'
+  if (provider === 'jitsi') return 'Jitsi'
+  if (provider === 'chime') return 'Chime'
   return 'Meeting'
 }
 
@@ -1198,6 +1238,7 @@ function openingDayKey(selectedKey, todayKeyWhenLeft, todayKey, windowMode) {
 
 if (typeof module !== 'undefined') module.exports = {
   openingDayKey,
+  meetingToJoin,
   calendarChoiceLabel,
   calendarDisplayColor,
   calendarDisplayName,

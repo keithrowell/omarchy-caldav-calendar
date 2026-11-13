@@ -154,6 +154,9 @@ Item {
     return h ? h + " h" : m + " min"
   }
 
+  // Today's meeting that starts within ten minutes or is under way.
+  readonly property var joinNow: isToday ? Model.meetingToJoin(dayEvents, now.getTime(), 10) : null
+
   readonly property string statusText: {
     var timed = (layout.length ? layout[0].segments : []).map(function(s) { return s.event })
     if (!isToday) {
@@ -416,11 +419,22 @@ Item {
                 font.pixelSize: Style.font.displayLarge
                 font.bold: true
               }
-              Text {
-                text: root.statusText
-                color: Commons.Color.accent
-                font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                font.pixelSize: Style.font.heading
+              Row {
+                spacing: Style.space(10)
+                Text {
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: root.statusText
+                  color: Commons.Color.accent
+                  font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                  font.pixelSize: Style.font.heading
+                }
+                JoinButton {
+                  anchors.verticalCenter: parent.verticalCenter
+                  visible: url !== ""
+                  bar: root.bar
+                  event: root.joinNow
+                  fontSize: Style.font.body
+                }
               }
             }
 
@@ -574,9 +588,12 @@ Item {
                     opacity: (past ? 0.5 : 1) * (event.status === "saving" ? 0.7 : 1)
                     clip: true
 
+                    readonly property bool joinBelow: height >= Style.space(56)
+
                     Column {
                       anchors.fill: parent
                       anchors.margins: Style.space(6)
+                      anchors.rightMargin: Style.space(6) + (blockJoin.visible && !block.joinBelow ? blockJoin.width + Style.space(6) : 0)
                       anchors.topMargin: block.height > Style.space(34) ? Style.space(5) : Style.space(2)
                       spacing: Style.space(1)
                       Text {
@@ -610,6 +627,19 @@ Item {
                       hoverEnabled: true
                       cursorShape: Qt.PointingHandCursor
                       onClicked: root.editEvent(block.event)
+                    }
+
+                    JoinButton {
+                      id: blockJoin
+                      visible: url !== "" && !block.past && block.width >= width + Style.space(40)
+                      bar: root.bar
+                      event: block.event
+                      compact: !block.joinBelow
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.space(6)
+                      anchors.bottom: block.joinBelow ? parent.bottom : undefined
+                      anchors.bottomMargin: Style.space(6)
+                      anchors.verticalCenter: block.joinBelow ? undefined : parent.verticalCenter
                     }
                   }
                 }

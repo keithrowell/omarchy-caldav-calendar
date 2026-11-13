@@ -729,6 +729,11 @@ def meeting_from_text(text: str) -> tuple[str, str]:
         ("zoom", r"(?:https?://)?(?:[\w.-]+\.)?zoom\.us/[^\s<>\"']+"),
         ("meet", r"(?:https?://)?meet\.google\.com/[^\s<>\"']+"),
         ("teams", r"(?:https?://)?teams\.(?:microsoft|live)\.com/[^\s<>\"']+"),
+        ("webex", r"(?:https?://)?[\w.-]+\.webex\.com/[^\s<>\"']+"),
+        ("whereby", r"(?:https?://)?whereby\.com/[^\s<>\"']+"),
+        ("goto", r"(?:https?://)?(?:meet\.goto\.com|global\.gotomeeting\.com/join|app\.gotomeeting\.com)/[^\s<>\"']+"),
+        ("jitsi", r"(?:https?://)?meet\.jit\.si/[^\s<>\"']+"),
+        ("chime", r"(?:https?://)?chime\.aws/[^\s<>\"']+"),
     )
     for provider, pattern in patterns:
         found = re.search(pattern, blob, re.I)
@@ -1088,7 +1093,9 @@ def eds_update_event(calendar_id: str, uid: str, rid: str, title: str, start: da
         eds_delete_event(calendar_id, uid, rid if scope == "this" and rid else "")
         return payload
 
-    keep_date = scope == "all"
+    # "all" on a series keeps the series' own date, since the form shows the date of
+    # the occurrence that was opened. A single event has no other date to keep.
+    keep_date = scope == "all" and bool(extract_rrule(existing))
     mod = modules.ECal.ObjModType.THIS if instance_edit else modules.ECal.ObjModType.ALL
     old_start = existing.get_dtstart()
     old_end = existing.get_dtend()

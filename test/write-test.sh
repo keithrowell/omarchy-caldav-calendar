@@ -43,6 +43,19 @@ jq -e '.ok == true and .event.title == "Omarchy Calendar Temporary Test Updated"
 "$ROOT/helper/omarchy-calendar-helper" snapshot --provider evolution-data-server --from 2026-08-20T00:00:00Z --to 2026-08-21T00:00:00Z |
   jq -e --arg uid "$uid" '.events[] | select(.uid == $uid and .title == "Omarchy Calendar Temporary Test Updated")' >/dev/null
 
+moved=$("$ROOT/helper/omarchy-calendar-helper" update-event \
+  --provider evolution-data-server \
+  --calendar-id system-calendar \
+  --uid "$uid" \
+  --scope all \
+  --title "Omarchy Calendar Temporary Test Updated" \
+  --from 2026-08-24T19:00:00Z \
+  --to 2026-08-24T19:30:00Z)
+jq -e '.event.start == "2026-08-24T19:00:00Z" and .event.end == "2026-08-24T19:30:00Z"' <<<"$moved" >/dev/null || {
+  echo "not ok - a single event edited with scope all should move to the new date" >&2
+  exit 1
+}
+
 "$ROOT/helper/omarchy-calendar-helper" delete-event --provider evolution-data-server --calendar-id system-calendar --uid "$uid" >/dev/null
 uid=""
 
